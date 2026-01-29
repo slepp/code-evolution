@@ -275,362 +275,602 @@ function createDataStructure(repoUrl, results, allLanguages, analysisTime, clocV
 
 function generateHTML(data, repoUrl) {
   const { results, allLanguages } = data;
-  
+
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0d1117">
   <title>Code Evolution: ${repoUrl}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <style>
+    :root {
+      /* Terminal dark palette */
+      --bg-void: #0a0c10;
+      --bg-primary: #0d1117;
+      --bg-secondary: #161b22;
+      --bg-tertiary: #21262d;
+      --bg-elevated: #30363d;
+
+      /* Vivid accent colors for data visualization */
+      --accent-cyan: #58d5e3;
+      --accent-purple: #a371f7;
+      --accent-pink: #f778ba;
+      --accent-orange: #f7845e;
+      --accent-yellow: #f0c239;
+      --accent-green: #3fb950;
+      --accent-blue: #58a6ff;
+
+      /* Text hierarchy */
+      --text-primary: #e6edf3;
+      --text-secondary: #8b949e;
+      --text-tertiary: #6e7681;
+      --text-inverse: #0d1117;
+
+      /* Semantic */
+      --success: #3fb950;
+      --error: #f85149;
+
+      /* Borders */
+      --border-default: #30363d;
+      --border-muted: #21262d;
+
+      /* Typography */
+      --font-display: 'Sora', system-ui, sans-serif;
+      --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
+
+      /* Animation */
+      --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
     * {
       margin: 0;
       padding: 0;
       box-sizing: border-box;
     }
-    
+
     body {
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      font-family: var(--font-display);
+      background: var(--bg-void);
+      background-image:
+        linear-gradient(rgba(88, 213, 227, 0.015) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(88, 213, 227, 0.015) 1px, transparent 1px);
+      background-size: 40px 40px;
       min-height: 100vh;
-      padding: 15px;
+      padding: 1rem;
+      color: var(--text-primary);
+      -webkit-font-smoothing: antialiased;
     }
-    
+
     .container {
-      background: white;
+      background: var(--bg-primary);
+      border: 1px solid var(--border-default);
       border-radius: 12px;
-      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
       max-width: 1800px;
       width: 100%;
-      padding: 20px;
       margin: 0 auto;
+      overflow: hidden;
+      position: relative;
     }
-    
+
+    /* Rainbow accent bar */
+    .container::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: linear-gradient(90deg,
+        var(--accent-cyan) 0%,
+        var(--accent-purple) 25%,
+        var(--accent-pink) 50%,
+        var(--accent-orange) 75%,
+        var(--accent-yellow) 100%
+      );
+    }
+
     .header {
-      text-align: center;
-      margin-bottom: 10px;
+      padding: 1.5rem 1.5rem 1rem;
+      border-bottom: 1px solid var(--border-muted);
     }
-    
+
     h1 {
-      color: #333;
-      font-size: 20px;
-      margin-bottom: 3px;
+      font-family: var(--font-mono);
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin-bottom: 0.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
     }
-    
+
+    h1::before {
+      content: '>';
+      color: var(--accent-cyan);
+      font-weight: 400;
+    }
+
     .repo-url {
-      color: #666;
-      font-size: 11px;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: var(--text-tertiary);
       word-break: break-all;
+      padding-left: 1.1rem;
     }
-    
+
+    .content-wrapper {
+      padding: 1rem 1.5rem 1.5rem;
+    }
+
     .main-content {
       display: flex;
-      gap: 20px;
-      margin-top: 15px;
+      gap: 1.25rem;
+      margin-top: 1rem;
     }
-    
+
     .left-panel {
-      flex: 0 0 500px;
+      flex: 0 0 420px;
       display: flex;
       flex-direction: column;
+      gap: 0.75rem;
     }
-    
+
     .right-panel {
       flex: 1;
       min-width: 0;
     }
-    
+
+    .card {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-default);
+      border-radius: 8px;
+      transition: border-color 0.25s var(--ease-out);
+    }
+
+    .card:hover {
+      border-color: var(--accent-cyan);
+    }
+
     .chart-container {
-      background: #f8f9fa;
-      border-radius: 6px;
-      padding: 15px;
-      height: 600px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-default);
+      border-radius: 8px;
+      padding: 1rem;
+      height: 580px;
       position: relative;
     }
-    
+
     #chart-canvas {
       max-height: 100%;
     }
-    
+
     .commit-info {
-      background: #f8f9fa;
-      padding: 8px 12px;
-      border-radius: 6px;
-      margin-bottom: 10px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-default);
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
       display: flex;
       justify-content: space-between;
       align-items: center;
       flex-wrap: wrap;
-      gap: 8px;
+      gap: 0.75rem;
     }
-    
+
     .commit-date {
-      font-size: 15px;
-      font-weight: 600;
-      color: #667eea;
+      font-family: var(--font-mono);
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--accent-cyan);
     }
-    
+
+    .commit-meta {
+      text-align: right;
+    }
+
     .commit-hash {
-      font-family: 'Courier New', monospace;
-      background: #e9ecef;
-      padding: 3px 8px;
+      font-family: var(--font-mono);
+      background: var(--bg-tertiary);
+      padding: 0.25rem 0.5rem;
       border-radius: 4px;
-      font-size: 12px;
-      color: #495057;
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+      display: inline-block;
     }
-    
+
     .commit-number {
-      font-size: 11px;
-      color: #6c757d;
-      margin-top: 2px;
+      font-family: var(--font-mono);
+      font-size: 0.65rem;
+      color: var(--text-tertiary);
+      margin-top: 0.25rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
     }
-    
+
     .table-container {
       flex: 1;
       overflow-y: auto;
-      max-height: 600px;
+      max-height: 450px;
+      border-radius: 8px;
     }
-    
+
     table {
       width: 100%;
       border-collapse: collapse;
-      font-size: 12px;
     }
-    
+
     th {
-      background: #667eea;
-      color: white;
-      padding: 6px 8px;
+      background: var(--bg-tertiary);
+      color: var(--text-secondary);
+      padding: 0.5rem 0.75rem;
       text-align: left;
+      font-family: var(--font-mono);
       font-weight: 600;
-      font-size: 10px;
+      font-size: 0.65rem;
       text-transform: uppercase;
-      letter-spacing: 0.3px;
+      letter-spacing: 0.1em;
       position: sticky;
       top: 0;
       z-index: 10;
+      border-bottom: 1px solid var(--border-default);
     }
-    
-    th:nth-child(2) {
-      width: 100px;
-    }
-    
-    th:nth-child(3), th:nth-child(4) {
+
+    th:nth-child(2), th:nth-child(3), th:nth-child(4) {
       text-align: right;
-      width: 70px;
     }
-    
+
     td {
-      padding: 4px 8px;
-      border-bottom: 1px solid #e9ecef;
+      padding: 0.4rem 0.75rem;
+      border-bottom: 1px solid var(--border-muted);
+      font-size: 0.8rem;
     }
-    
-    tr:hover {
-      background: #f8f9fa;
+
+    tbody tr {
+      transition: background 0.15s;
     }
-    
+
+    tbody tr:hover {
+      background: var(--bg-tertiary);
+    }
+
     .language-name {
+      font-family: var(--font-mono);
       font-weight: 600;
-      color: #333;
-      font-size: 11px;
+      font-size: 0.75rem;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
-    
+
     .percentage-text {
       text-align: right;
+      font-family: var(--font-mono);
       font-weight: 600;
-      color: #667eea;
-      font-size: 11px;
-      white-space: nowrap;
+      color: var(--accent-cyan);
+      font-size: 0.75rem;
     }
-    
+
     .lines-count {
       text-align: right;
-      font-family: 'Courier New', monospace;
-      color: #495057;
+      font-family: var(--font-mono);
+      color: var(--text-secondary);
       font-weight: 500;
-      font-size: 11px;
-      white-space: nowrap;
+      font-size: 0.75rem;
     }
-    
+
     .lines-secondary {
       display: block;
-      font-size: 9px;
-      color: #adb5bd;
-      margin-top: 2px;
-      font-weight: normal;
+      font-size: 0.6rem;
+      color: var(--text-tertiary);
+      margin-top: 0.15rem;
+      font-weight: 400;
     }
-    
+
     .files-count {
       text-align: right;
-      font-family: 'Courier New', monospace;
-      color: #6c757d;
-      font-size: 11px;
-      white-space: nowrap;
+      font-family: var(--font-mono);
+      color: var(--text-secondary);
+      font-size: 0.75rem;
     }
-    
+
     .row-inactive {
-      opacity: 0.4;
+      opacity: 0.35;
     }
-    
-    .row-inactive .language-name {
-      font-style: italic;
-    }
-    
+
     .delta {
-      font-size: 10px;
-      margin-left: 4px;
+      font-size: 0.65rem;
+      margin-left: 0.25rem;
       font-weight: 600;
-      display: inline-block;
     }
-    
-    .delta-positive {
-      color: #28a745;
-    }
-    
-    .delta-negative {
-      color: #dc3545;
-    }
-    
-    .delta-neutral {
-      color: #6c757d;
-    }
-    
+
+    .delta-positive { color: var(--success); }
+    .delta-negative { color: var(--error); }
+    .delta-neutral { color: var(--text-tertiary); }
+
     .summary-stats {
-      background: #f8f9fa;
-      padding: 10px;
-      border-radius: 6px;
-      margin-bottom: 10px;
-      display: flex;
-      justify-content: space-around;
-      align-items: center;
-      gap: 10px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-default);
+      padding: 0.75rem;
+      border-radius: 8px;
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 0.75rem;
     }
-    
+
     .stat-item {
       text-align: center;
-      flex: 1;
+      padding: 0.5rem;
+      background: var(--bg-tertiary);
+      border-radius: 6px;
     }
-    
+
     .stat-label {
-      font-size: 9px;
-      color: #6c757d;
+      font-family: var(--font-mono);
+      font-size: 0.6rem;
+      color: var(--text-tertiary);
       text-transform: uppercase;
-      letter-spacing: 0.3px;
-      margin-bottom: 3px;
+      letter-spacing: 0.1em;
+      margin-bottom: 0.25rem;
     }
-    
+
     .stat-value {
-      font-size: 16px;
+      font-family: var(--font-mono);
+      font-size: 1.25rem;
       font-weight: 700;
-      color: #333;
-      font-family: 'Courier New', monospace;
+      color: var(--accent-cyan);
     }
-    
+
     .stat-delta {
-      font-size: 11px;
+      font-size: 0.7rem;
       font-weight: 600;
-      margin-top: 2px;
+      margin-top: 0.15rem;
     }
-    
+
     .controls {
       display: flex;
       justify-content: center;
-      gap: 8px;
-      margin-bottom: 10px;
+      align-items: center;
+      gap: 0.75rem;
       flex-wrap: wrap;
     }
-    
+
+    .controls-primary {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .controls-secondary {
+      display: flex;
+      gap: 0.35rem;
+      padding-left: 0.5rem;
+      border-left: 1px solid var(--border-muted);
+    }
+
     button {
-      background: #667eea;
-      color: white;
-      border: none;
-      padding: 6px 12px;
+      font-family: var(--font-mono);
+      background: var(--bg-tertiary);
+      color: var(--text-primary);
+      border: 1px solid var(--border-default);
+      padding: 0.5rem 0.875rem;
       border-radius: 6px;
-      font-size: 11px;
+      font-size: 0.75rem;
       font-weight: 600;
       cursor: pointer;
-      transition: background 0.3s;
-      box-shadow: 0 2px 4px rgba(102, 126, 234, 0.3);
+      transition: all 0.2s var(--ease-out);
     }
-    
+
     button:hover {
-      background: #5568d3;
+      background: var(--bg-elevated);
+      border-color: var(--accent-cyan);
     }
-    
+
+    button.primary {
+      background: linear-gradient(135deg, var(--accent-cyan) 0%, var(--accent-blue) 100%);
+      color: var(--text-inverse);
+      border: none;
+      padding: 0.6rem 1.25rem;
+      font-size: 0.8rem;
+      box-shadow: 0 0 15px rgba(88, 213, 227, 0.25);
+    }
+
+    button.primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 20px rgba(88, 213, 227, 0.35);
+    }
+
+    button.secondary {
+      background: transparent;
+      color: var(--text-tertiary);
+      border: 1px solid var(--border-muted);
+      padding: 0.35rem 0.6rem;
+      font-size: 0.65rem;
+      opacity: 0.7;
+    }
+
+    button.secondary:hover {
+      opacity: 1;
+      color: var(--text-secondary);
+      border-color: var(--border-default);
+      background: var(--bg-tertiary);
+    }
+
     button:disabled {
-      background: #adb5bd;
+      opacity: 0.4;
       cursor: not-allowed;
-      box-shadow: none;
+      transform: none !important;
+      box-shadow: none !important;
     }
-    
+
     .speed-control {
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 0.4rem;
+      margin-left: 0.5rem;
+      padding-left: 0.5rem;
+      border-left: 1px solid var(--border-default);
     }
-    
+
     .speed-control label {
-      font-size: 11px;
-      color: #495057;
-      font-weight: 600;
+      font-family: var(--font-mono);
+      font-size: 0.65rem;
+      color: var(--text-tertiary);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
     }
-    
+
     .speed-control select {
-      padding: 4px 8px;
-      border: 2px solid #e9ecef;
+      font-family: var(--font-mono);
+      padding: 0.35rem 0.5rem;
+      border: 1px solid var(--border-default);
       border-radius: 4px;
-      font-size: 11px;
+      font-size: 0.7rem;
       cursor: pointer;
-      background: white;
+      background: var(--bg-tertiary);
+      color: var(--text-primary);
     }
-    
+
     .empty-state {
       text-align: center;
-      padding: 40px;
-      color: #6c757d;
+      padding: 2rem;
+      color: var(--text-tertiary);
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
     }
-    
+
     .timeline {
-      background: #f8f9fa;
-      padding: 8px 12px;
-      border-radius: 6px;
-      margin-bottom: 10px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-default);
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
     }
-    
+
     .timeline-bar {
       width: 100%;
       height: 6px;
-      background: #e9ecef;
+      background: var(--bg-tertiary);
       border-radius: 3px;
       overflow: hidden;
     }
-    
+
     .timeline-progress {
       height: 100%;
-      background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-      transition: width 0.2s ease;
+      background: linear-gradient(90deg, var(--accent-cyan) 0%, var(--accent-purple) 100%);
+      border-radius: 3px;
+      transition: width 0.2s var(--ease-out);
+      position: relative;
     }
-    
+
+    .timeline-progress::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+      animation: shimmer 1.5s infinite;
+    }
+
+    @keyframes shimmer {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(100%); }
+    }
+
+    .top-bar {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      gap: 1rem;
+      align-items: center;
+      margin-bottom: 0.75rem;
+    }
+
+    .top-bar .commit-info {
+      margin: 0;
+    }
+
+    .top-bar .timeline {
+      margin: 0;
+    }
+
+    .footer {
+      padding: 1rem 1.5rem;
+      border-top: 1px solid var(--border-muted);
+      text-align: center;
+      font-size: 0.7rem;
+      color: var(--text-tertiary);
+    }
+
+    .footer a {
+      color: var(--accent-cyan);
+      text-decoration: none;
+    }
+
+    .footer a:hover {
+      color: var(--text-primary);
+    }
+
     @media (max-width: 1200px) {
       .main-content {
         flex-direction: column;
       }
-      
+
       .left-panel {
         flex: none;
         width: 100%;
       }
-      
+
       .table-container {
-        max-height: 400px;
+        max-height: 350px;
       }
-      
+
       .chart-container {
         height: 400px;
+      }
+
+      .top-bar {
+        grid-template-columns: 1fr;
+        gap: 0.75rem;
+      }
+    }
+
+    @media (max-width: 600px) {
+      body {
+        padding: 0.5rem;
+      }
+
+      .header, .content-wrapper {
+        padding: 1rem;
+      }
+
+      h1 {
+        font-size: 1rem;
+      }
+
+      .controls {
+        gap: 0.5rem;
+      }
+
+      .controls-primary {
+        gap: 0.35rem;
+      }
+
+      .controls-secondary {
+        padding-left: 0.35rem;
+      }
+
+      button.primary {
+        padding: 0.5rem 0.9rem;
+        font-size: 0.7rem;
+      }
+
+      button.secondary {
+        padding: 0.3rem 0.5rem;
+        font-size: 0.6rem;
       }
     }
   </style>
@@ -638,99 +878,113 @@ function generateHTML(data, repoUrl) {
 <body>
   <div class="container">
     <div class="header">
-      <h1>📊 Code Evolution Timeline</h1>
+      <h1>Code Evolution</h1>
       <div class="repo-url">${escapeHtml(repoUrl)}</div>
     </div>
-    
-    <div class="commit-info">
-      <div class="commit-date" id="commit-date">Loading...</div>
-      <div>
-        <div class="commit-hash" id="commit-hash">--------</div>
-        <div class="commit-number" id="commit-number">Commit 0 of 0</div>
-      </div>
-    </div>
-    
-    <div class="timeline">
-      <div class="timeline-bar">
-        <div class="timeline-progress" id="timeline-progress"></div>
-      </div>
-    </div>
-    
-    <div class="controls">
-      <button id="play-pause">▶ Play</button>
-      <button id="prev">⏮ Previous</button>
-      <button id="next">⏭ Next</button>
-      <button id="reset">⏪ Reset</button>
-      <div class="speed-control">
-        <label>Speed:</label>
-        <select id="speed">
-          <option value="500">0.5x</option>
-          <option value="200" selected>1x</option>
-          <option value="100">2x</option>
-          <option value="50">4x</option>
-        </select>
-      </div>
-    </div>
-    
-    <div class="summary-stats" id="summary-stats">
-      <div class="stat-item">
-        <div class="stat-label">Total Lines</div>
-        <div class="stat-value" id="total-lines">0</div>
-        <div class="stat-delta" id="total-delta"></div>
-      </div>
-      <div class="stat-item">
-        <div class="stat-label">Total Files</div>
-        <div class="stat-value" id="total-files">0</div>
-        <div class="stat-delta" id="files-delta"></div>
-      </div>
-    </div>
-    
-    <div class="main-content">
-      <div class="left-panel">
-        <div class="table-container">
-          <table id="stats-table">
-            <thead>
-              <tr>
-                <th>Language</th>
-                <th>%</th>
-                <th>Lines</th>
-                <th>Files</th>
-              </tr>
-            </thead>
-            <tbody id="table-body">
-              <tr>
-                <td colspan="4" class="empty-state">Loading data...</td>
-              </tr>
-            </tbody>
-          </table>
+
+    <div class="content-wrapper">
+      <div class="top-bar">
+        <div class="commit-info">
+          <div class="commit-date" id="commit-date">Loading...</div>
+          <div class="commit-meta">
+            <div class="commit-hash" id="commit-hash">--------</div>
+            <div class="commit-number" id="commit-number">Commit 0 of 0</div>
+          </div>
+        </div>
+
+        <div class="controls">
+          <div class="controls-primary">
+            <button id="play-pause" class="primary">Play</button>
+            <button id="go-latest" class="primary">Latest</button>
+          </div>
+          <div class="controls-secondary">
+            <button id="prev" class="secondary">Prev</button>
+            <button id="next" class="secondary">Next</button>
+            <button id="reset" class="secondary">Reset</button>
+          </div>
+          <div class="speed-control">
+            <label>Speed</label>
+            <select id="speed">
+              <option value="500">0.5x</option>
+              <option value="200" selected>1x</option>
+              <option value="100">2x</option>
+              <option value="50">4x</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="timeline">
+          <div class="timeline-bar">
+            <div class="timeline-progress" id="timeline-progress"></div>
+          </div>
         </div>
       </div>
-      
-      <div class="right-panel">
-        <div class="chart-container">
-          <canvas id="chart-canvas"></canvas>
+
+      <div class="main-content">
+        <div class="left-panel">
+          <div class="summary-stats" id="summary-stats">
+            <div class="stat-item">
+              <div class="stat-label">Total Lines</div>
+              <div class="stat-value" id="total-lines">0</div>
+              <div class="stat-delta" id="total-delta"></div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">Total Files</div>
+              <div class="stat-value" id="total-files">0</div>
+              <div class="stat-delta" id="files-delta"></div>
+            </div>
+          </div>
+
+          <div class="card table-container">
+            <table id="stats-table">
+              <thead>
+                <tr>
+                  <th>Language</th>
+                  <th>%</th>
+                  <th>Lines</th>
+                  <th>Files</th>
+                </tr>
+              </thead>
+              <tbody id="table-body">
+                <tr>
+                  <td colspan="4" class="empty-state">Loading data...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="right-panel">
+          <div class="chart-container">
+            <canvas id="chart-canvas"></canvas>
+          </div>
         </div>
       </div>
+    </div>
+
+    <div class="footer">
+      Generated by <a href="https://github.com/slepp/cloc-history-analyzer">CLOC History Analyzer</a>
+      &mdash; &copy; 2026 <a href="https://slepp.ca/">slepp</a>
     </div>
   </div>
 
   <script>
     const DATA = ${JSON.stringify(results)};
     const ALL_LANGUAGES = ${JSON.stringify(allLanguages)};
-    
+
     let currentIndex = 0;
     let isPlaying = false;
     let animationInterval = null;
     let frameDelay = ${FRAME_DELAY_MS};
     let chart = null;
-    
-    // Generate colors for languages
+
+    // Data visualization color palette - vivid, distinct colors
     const LANGUAGE_COLORS = {};
     const colorPalette = [
-      '#667eea', '#764ba2', '#f093fb', '#4facfe', 
-      '#43e97b', '#fa709a', '#fee140', '#30cfd0',
-      '#a8edea', '#fed6e3', '#c471f5', '#fa8bff',
-      '#ffc371', '#ff5f6d', '#ffc3a0', '#ffafbd'
+      '#58d5e3', '#a371f7', '#f778ba', '#f7845e',
+      '#f0c239', '#3fb950', '#58a6ff', '#ff7b72',
+      '#79c0ff', '#d2a8ff', '#7ee787', '#ffa657',
+      '#a5d6ff', '#ffbedd', '#56d4dd', '#ffd33d'
     ];
     ALL_LANGUAGES.forEach((lang, i) => {
       LANGUAGE_COLORS[lang] = colorPalette[i % colorPalette.length];
@@ -742,6 +996,7 @@ function generateHTML(data, repoUrl) {
       number: document.getElementById('commit-number'),
       tableBody: document.getElementById('table-body'),
       playPause: document.getElementById('play-pause'),
+      goLatest: document.getElementById('go-latest'),
       prev: document.getElementById('prev'),
       next: document.getElementById('next'),
       reset: document.getElementById('reset'),
@@ -779,19 +1034,27 @@ function generateHTML(data, repoUrl) {
     
     function initChart() {
       const ctx = document.getElementById('chart-canvas').getContext('2d');
-      
+
+      // Chart.js dark theme configuration
+      Chart.defaults.color = '#8b949e';
+      Chart.defaults.borderColor = '#30363d';
+
       // Prepare datasets for each language
       const datasets = ALL_LANGUAGES.map(lang => ({
         label: lang,
         data: [],
         borderColor: LANGUAGE_COLORS[lang],
-        backgroundColor: LANGUAGE_COLORS[lang] + '20',
+        backgroundColor: LANGUAGE_COLORS[lang] + '15',
         borderWidth: 2,
-        tension: 0.1,
+        tension: 0.2,
         pointRadius: 0,
-        pointHoverRadius: 4
+        pointHoverRadius: 5,
+        pointHoverBackgroundColor: LANGUAGE_COLORS[lang],
+        pointHoverBorderColor: '#e6edf3',
+        pointHoverBorderWidth: 2,
+        fill: false
       }));
-      
+
       chart = new Chart(ctx, {
         type: 'line',
         data: {
@@ -809,18 +1072,30 @@ function generateHTML(data, repoUrl) {
               display: true,
               position: 'top',
               labels: {
-                boxWidth: 12,
-                font: { size: 10 },
-                padding: 8,
-                usePointStyle: true
+                boxWidth: 10,
+                boxHeight: 10,
+                font: { family: "'JetBrains Mono', monospace", size: 10 },
+                padding: 12,
+                usePointStyle: true,
+                pointStyle: 'circle',
+                color: '#8b949e'
               }
             },
             tooltip: {
               mode: 'index',
               intersect: false,
+              backgroundColor: '#161b22',
+              borderColor: '#30363d',
+              borderWidth: 1,
+              titleFont: { family: "'JetBrains Mono', monospace", size: 11, weight: '600' },
+              bodyFont: { family: "'JetBrains Mono', monospace", size: 10 },
+              titleColor: '#e6edf3',
+              bodyColor: '#8b949e',
+              padding: 10,
+              cornerRadius: 6,
               callbacks: {
                 label: function(context) {
-                  return context.dataset.label + ': ' + formatNumber(context.parsed.y) + ' lines';
+                  return ' ' + context.dataset.label + ': ' + formatNumber(context.parsed.y) + ' lines';
                 }
               }
             }
@@ -829,24 +1104,41 @@ function generateHTML(data, repoUrl) {
             x: {
               title: {
                 display: true,
-                text: 'Commit Number',
-                font: { size: 11 }
+                text: 'COMMIT',
+                font: { family: "'JetBrains Mono', monospace", size: 9, weight: '600' },
+                color: '#6e7681',
+                padding: { top: 8 }
               },
               ticks: {
-                font: { size: 10 }
+                font: { family: "'JetBrains Mono', monospace", size: 9 },
+                color: '#6e7681',
+                maxRotation: 0
+              },
+              grid: {
+                color: '#21262d',
+                lineWidth: 1
               }
             },
             y: {
               title: {
                 display: true,
-                text: 'Lines of Code',
-                font: { size: 11 }
+                text: 'LINES OF CODE',
+                font: { family: "'JetBrains Mono', monospace", size: 9, weight: '600' },
+                color: '#6e7681',
+                padding: { bottom: 8 }
               },
               ticks: {
-                font: { size: 10 },
+                font: { family: "'JetBrains Mono', monospace", size: 9 },
+                color: '#6e7681',
                 callback: function(value) {
-                  return formatNumber(value);
+                  if (value >= 1000000) return (value / 1000000).toFixed(1) + 'M';
+                  if (value >= 1000) return (value / 1000).toFixed(0) + 'k';
+                  return value;
                 }
+              },
+              grid: {
+                color: '#21262d',
+                lineWidth: 1
               },
               beginAtZero: true
             }
@@ -1004,8 +1296,9 @@ function generateHTML(data, repoUrl) {
     function play() {
       if (isPlaying) return;
       isPlaying = true;
-      elements.playPause.textContent = '⏸ Pause';
-      
+      elements.playPause.textContent = 'Pause';
+      elements.playPause.classList.remove('primary');
+
       animationInterval = setInterval(() => {
         currentIndex++;
         if (currentIndex >= DATA.length) {
@@ -1015,10 +1308,11 @@ function generateHTML(data, repoUrl) {
         updateDisplay();
       }, frameDelay);
     }
-    
+
     function pause() {
       isPlaying = false;
-      elements.playPause.textContent = '▶ Play';
+      elements.playPause.textContent = 'Play';
+      elements.playPause.classList.add('primary');
       if (animationInterval) {
         clearInterval(animationInterval);
         animationInterval = null;
@@ -1042,7 +1336,13 @@ function generateHTML(data, repoUrl) {
       currentIndex = 0;
       updateDisplay();
     }
-    
+
+    function goLatest() {
+      pause();
+      currentIndex = DATA.length - 1;
+      updateDisplay();
+    }
+
     // Event listeners
     elements.playPause.addEventListener('click', () => {
       if (isPlaying) pause();
@@ -1052,6 +1352,7 @@ function generateHTML(data, repoUrl) {
     elements.next.addEventListener('click', next);
     elements.prev.addEventListener('click', prev);
     elements.reset.addEventListener('click', reset);
+    elements.goLatest.addEventListener('click', goLatest);
     
     elements.speed.addEventListener('change', (e) => {
       frameDelay = parseInt(e.target.value);
@@ -1076,6 +1377,9 @@ function generateHTML(data, repoUrl) {
       } else if (e.code === 'Home') {
         e.preventDefault();
         reset();
+      } else if (e.code === 'End') {
+        e.preventDefault();
+        goLatest();
       }
     });
     
