@@ -1,0 +1,33 @@
+# Output directories
+output/
+test-output/
+metrics/
+
+# Node modules (if any future dependencies)
+node_modules/
+
+# Temporary files
+*.tmp
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Log files
+*.log
+npm-debug.log*
+
+# Test artifacts
+.tmp/
+temp/
+
+# OS files
+.DS_Store
+.AppleDouble
+.LSOverride
+desktop.ini

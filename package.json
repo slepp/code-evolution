@@ -1,0 +1,42 @@
+{
+  "name": "cloc-history-analyzer",
+  "version": "0.3.0",
+  "description": "Visualize code evolution over time with interactive animated graphs. Analyzes git history using cloc with incremental updates.",
+  "type": "module",
+  "main": "analyze.mjs",
+  "bin": {
+    "cloc-history": "./analyze.mjs"
+  },
+  "scripts": {
+    "analyze": "node analyze.mjs",
+    "test": "./test.sh"
+  },
+  "keywords": [
+    "cloc",
+    "git",
+    "code-analysis",
+    "visualization",
+    "metrics",
+    "history",
+    "evolution",
+    "chart",
+    "graph",
+    "incremental"
+  ],
+  "author": "Stephen Olesen <slepp@slepp.ca>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/slepp/cloc-history-analyzer.git"
+  },
+  "bugs": {
+    "url": "https://github.com/slepp/cloc-history-analyzer/issues"
+  },
+  "homepage": "https://github.com/slepp/cloc-history-analyzer#readme",
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}
+
