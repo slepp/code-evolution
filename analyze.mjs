@@ -23,6 +23,31 @@ import { join } from 'path';
 const FRAME_DELAY_MS = 200;
 const SCHEMA_VERSION = '2.0';
 
+// Global flag for JSON progress output
+let JSON_PROGRESS = false;
+
+/**
+ * Emit a progress event as JSONL to stderr
+ * @param {string} stage - Current stage (validating, cloning, analyzing, generating, complete)
+ * @param {number} progress - Progress percentage (0-100)
+ * @param {string} message - Human-readable message
+ * @param {object} data - Additional data
+ */
+function emitProgress(stage, progress, message, data = {}) {
+  if (!JSON_PROGRESS) return;
+  
+  const event = {
+    type: 'progress',
+    stage,
+    progress: Math.min(100, Math.max(0, progress)),
+    message,
+    timestamp: new Date().toISOString(),
+    ...data
+  };
+  
+  console.error(JSON.stringify(event));
+}
+
 function exec(cmd, options = {}) {
   try {
     return execSync(cmd, { 
@@ -39,14 +64,24 @@ function exec(cmd, options = {}) {
 }
 
 function cloneRepo(repoUrl, targetDir) {
-  console.log(`\n📦 Cloning repository: ${repoUrl}`);
+  if (!JSON_PROGRESS) {
+    console.log(`\n📦 Cloning repository: ${repoUrl}`);
+  }
+  emitProgress('cloning', 5, `Cloning repository: ${repoUrl}`);
+  
   exec(`git clone "${repoUrl}" "${targetDir}"`);
-  console.log('✓ Clone complete');
+  
+  if (!JSON_PROGRESS) {
+    console.log('✓ Clone complete');
+  }
+  emitProgress('cloning', 10, 'Clone complete');
 }
 
 function getCommitHistory(repoDir, branch = 'main', afterCommit = null) {
   const label = afterCommit ? 'new commits' : 'commit history';
-  console.log(`\n📜 Getting ${label} from branch: ${branch}`);
+  if (!JSON_PROGRESS) {
+    console.log(`\n📜 Getting ${label} from branch: ${branch}`);
+  }
   
   // Try main first, fall back to master
   const branches = exec(`git -C "${repoDir}" branch -r`, { silent: true });
@@ -56,7 +91,9 @@ function getCommitHistory(repoDir, branch = 'main', afterCommit = null) {
   let actualBranch = branch;
   if (branch === 'main' && !hasMain && hasMaster) {
     actualBranch = 'master';
-    console.log('  (using master branch instead)');
+    if (!JSON_PROGRESS) {
+      console.log('  (using master branch instead)');
+    }
   }
   
   // Get commits in chronological order (oldest first)
@@ -70,7 +107,10 @@ function getCommitHistory(repoDir, branch = 'main', afterCommit = null) {
     .split('\n')
     .filter(line => line.trim());
   
-  console.log(`✓ Found ${commits.length} commits`);
+  if (!JSON_PROGRESS) {
+    console.log(`✓ Found ${commits.length} commits`);
+  }
+  emitProgress('analyzing', 12, `Found ${commits.length} commits`, { total_commits: commits.length });
   
   return commits.map(line => {
     const [hash, date, ...messageParts] = line.split('|');
@@ -146,7 +186,9 @@ function runCloc(repoDir) {
 }
 
 function analyzeCommits(repoDir, commits, existingResults = []) {
-  console.log(`\n🔍 Analyzing ${commits.length} commits...\n`);
+  if (!JSON_PROGRESS) {
+    console.log(`\n🔍 Analyzing ${commits.length} commits...\n`);
+  }
   
   const results = [...existingResults]; // Start with existing results
   const allLanguages = new Set();
@@ -157,12 +199,25 @@ function analyzeCommits(repoDir, commits, existingResults = []) {
   }
   
   const startTime = Date.now();
+  const totalCommits = commits.length;
   
   for (let i = 0; i < commits.length; i++) {
     const commit = commits[i];
     const progress = `[${i + 1}/${commits.length}]`;
     
-    process.stdout.write(`${progress} ${commit.hash.substring(0, 8)} (${commit.date})...`);
+    // Calculate progress percentage (15% to 85% of total progress)
+    const commitProgress = 15 + Math.floor((i / totalCommits) * 70);
+    
+    if (!JSON_PROGRESS) {
+      process.stdout.write(`${progress} ${commit.hash.substring(0, 8)} (${commit.date})...`);
+    }
+    
+    emitProgress('analyzing', commitProgress, `Analyzing commit ${i + 1} of ${totalCommits}`, {
+      current_commit: i + 1,
+      total_commits: totalCommits,
+      commit_hash: commit.hash.substring(0, 8),
+      commit_date: commit.date
+    });
     
     // Checkout commit
     exec(`git -C "${repoDir}" checkout -q ${commit.hash}`, { silent: true });
@@ -181,14 +236,22 @@ function analyzeCommits(repoDir, commits, existingResults = []) {
       languages: clocData.languages
     });
     
-    process.stdout.write(' ✓\n');
+    if (!JSON_PROGRESS) {
+      process.stdout.write(' ✓\n');
+    }
   }
   
   const elapsedSeconds = (Date.now() - startTime) / 1000;
   
   if (commits.length > 0) {
-    console.log(`\n✓ Analysis complete (${elapsedSeconds.toFixed(2)}s)`);
-    console.log(`📊 Languages found: ${Array.from(allLanguages).sort().join(', ')}`);
+    if (!JSON_PROGRESS) {
+      console.log(`\n✓ Analysis complete (${elapsedSeconds.toFixed(2)}s)`);
+      console.log(`📊 Languages found: ${Array.from(allLanguages).sort().join(', ')}`);
+    }
+    emitProgress('analyzing', 85, 'Analysis complete', {
+      elapsed_seconds: elapsedSeconds,
+      languages: Array.from(allLanguages).sort()
+    });
   }
   
   // Calculate stable sort order based on final commit
@@ -1414,17 +1477,19 @@ Analyzes code evolution over time by running cloc on every commit.
 Supports incremental updates - only analyzes new commits on subsequent runs.
 
 Usage:
-  node analyze.mjs <git-repo-url> [output-dir] [--force-full]
+  node analyze.mjs <git-repo-url> [output-dir] [--force-full] [--json-progress]
 
 Arguments:
-  git-repo-url    URL of the git repository to analyze
-  output-dir      Output directory (default: ./output)
-  --force-full    Force full analysis, ignore existing data
+  git-repo-url      URL of the git repository to analyze
+  output-dir        Output directory (default: ./output)
+  --force-full      Force full analysis, ignore existing data
+  --json-progress   Output progress as JSONL to stderr for machine parsing
 
 Example:
   node analyze.mjs https://github.com/user/repo
   node analyze.mjs https://github.com/user/repo ./my-output
   node analyze.mjs https://github.com/user/repo ./output --force-full
+  node analyze.mjs https://github.com/user/repo ./output --json-progress
 
 Output:
   - output/data.json          Raw cloc data for all commits (v2.0 format)
@@ -1445,19 +1510,25 @@ Incremental Updates:
   for (let i = 1; i < args.length; i++) {
     if (args[i] === '--force-full') {
       forceFull = true;
+    } else if (args[i] === '--json-progress') {
+      JSON_PROGRESS = true;
     } else if (!args[i].startsWith('--')) {
       outputDir = args[i];
     }
   }
   
-  console.log(`📊 CLOC History Analyzer v${SCHEMA_VERSION}`);
-  console.log('========================\n');
-  console.log(`Repository: ${repoUrl}`);
-  console.log(`Output: ${outputDir}`);
-  if (forceFull) {
-    console.log('Mode: Full analysis (--force-full)');
+  emitProgress('validating', 0, 'Starting analysis...');
+  
+  if (!JSON_PROGRESS) {
+    console.log(`📊 CLOC History Analyzer v${SCHEMA_VERSION}`);
+    console.log('========================\n');
+    console.log(`Repository: ${repoUrl}`);
+    console.log(`Output: ${outputDir}`);
+    if (forceFull) {
+      console.log('Mode: Full analysis (--force-full)');
+    }
+    console.log();
   }
-  console.log();
   
   // Create output directory
   exec(`mkdir -p "${outputDir}"`, { silent: true });
@@ -1467,9 +1538,14 @@ Incremental Updates:
   if (!forceFull) {
     existingData = loadExistingData(outputDir);
     if (existingData) {
-      console.log(`✓ Found existing data (${existingData.results.length} commits)`);
-      console.log(`  Last analyzed: ${existingData.metadata.last_commit_date}`);
-      console.log(`  Last commit: ${existingData.metadata.last_commit_hash.substring(0, 8)}`);
+      if (!JSON_PROGRESS) {
+        console.log(`✓ Found existing data (${existingData.results.length} commits)`);
+        console.log(`  Last analyzed: ${existingData.metadata.last_commit_date}`);
+        console.log(`  Last commit: ${existingData.metadata.last_commit_hash.substring(0, 8)}`);
+      }
+      emitProgress('validating', 3, 'Found existing analysis data', {
+        existing_commits: existingData.results.length
+      });
     }
   }
   
@@ -1517,28 +1593,50 @@ Incremental Updates:
     );
     
     // Save data
+    emitProgress('generating', 90, 'Saving analysis data...');
     const dataFile = join(outputDir, 'data.json');
     writeFileSync(dataFile, JSON.stringify(data, null, 2));
-    console.log(`\n💾 Data saved: ${dataFile}`);
-    console.log(`   Schema version: ${data.schema_version}`);
-    console.log(`   Total commits: ${data.results.length}`);
-    console.log(`   Languages: ${data.allLanguages.length}`);
+    if (!JSON_PROGRESS) {
+      console.log(`\n💾 Data saved: ${dataFile}`);
+      console.log(`   Schema version: ${data.schema_version}`);
+      console.log(`   Total commits: ${data.results.length}`);
+      console.log(`   Languages: ${data.allLanguages.length}`);
+    }
     
     // Generate HTML
+    emitProgress('generating', 95, 'Generating HTML visualization...');
     const html = generateHTML(data, repoUrl);
     const htmlFile = join(outputDir, 'visualization.html');
     writeFileSync(htmlFile, html);
-    console.log(`🎨 Visualization generated: ${htmlFile}`);
+    if (!JSON_PROGRESS) {
+      console.log(`🎨 Visualization generated: ${htmlFile}`);
+    }
     
-    console.log('\n✅ Analysis complete!');
-    console.log(`\nOpen ${htmlFile} in a browser to view the animation.`);
+    emitProgress('complete', 100, 'Analysis complete!', {
+      total_commits: data.results.length,
+      languages: data.allLanguages.length,
+      output_dir: outputDir
+    });
+    
+    if (!JSON_PROGRESS) {
+      console.log('\n✅ Analysis complete!');
+      console.log(`\nOpen ${htmlFile} in a browser to view the animation.`);
+    }
     
   } catch (error) {
-    console.error('\n❌ Error:', error.message);
+    if (!JSON_PROGRESS) {
+      console.error('\n❌ Error:', error.message);
+    }
+    emitProgress('failed', 0, `Analysis failed: ${error.message}`, {
+      error: error.message,
+      stack: error.stack
+    });
     process.exit(1);
   } finally {
     // Cleanup
-    console.log('\n🧹 Cleaning up temporary files...');
+    if (!JSON_PROGRESS) {
+      console.log('\n🧹 Cleaning up temporary files...');
+    }
     rmSync(tempDir, { recursive: true, force: true });
   }
 }
