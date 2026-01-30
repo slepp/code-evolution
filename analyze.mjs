@@ -1417,6 +1417,7 @@ function generateHTML(data, repoUrl) {
     let reverbWetGain = null;
     let reverbDryGain = null;
     let voices = [];
+    let languageVoiceMap = {};  // Map language name to voice index (stable assignment)
 
     // Data visualization color palette - vivid, distinct colors
     const LANGUAGE_COLORS = {};
@@ -1688,6 +1689,7 @@ function generateHTML(data, repoUrl) {
 
       // Create voice pool (oscillator + individual gain per voice)
       // Assign frequencies from major scale: C, D, E, F, G, A, B, C, D, E...
+      // Each language gets a stable voice assignment
       for (let i = 0; i < MAX_VOICES; i++) {
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
@@ -1709,8 +1711,17 @@ function generateHTML(data, repoUrl) {
         gain.connect(filter);
         osc.start();
 
-        voices.push({ osc, gain });
+        voices.push({ osc, gain, lang: null });  // Track which language owns this voice
       }
+      
+      // Assign each language to a voice based on its index in ALL_LANGUAGES
+      // This gives each language a stable pitch throughout the animation
+      ALL_LANGUAGES.forEach((lang, i) => {
+        if (i < MAX_VOICES) {
+          languageVoiceMap[lang] = i;
+          voices[i].lang = lang;
+        }
+      });
     }
 
     function updateAudio() {
@@ -1720,30 +1731,28 @@ function generateHTML(data, repoUrl) {
       const rampEnd = now + (RAMP_TIME_MS / 1000);
       const commit = DATA[currentIndex];
 
-      // Sort languages by code lines (descending) to assign scale positions
-      const sorted = ALL_LANGUAGES
-        .map(lang => ({ lang, lines: commit.languages[lang]?.code || 0 }))
-        .sort((a, b) => b.lines - a.lines);
-
-      const totalLines = sorted.reduce((sum, l) => sum + l.lines, 0);
-
-      // Update each voice based on its rank in the major scale
-      sorted.forEach((item, rank) => {
-        if (rank >= MAX_VOICES) return;
-
-        const voice = voices[rank];
-        // Proportion is per-commit: this language's lines / total lines at this commit
-        const proportion = totalLines > 0 ? item.lines / totalLines : 0;
-        
-        // Each voice already has its frequency set from the major scale during init
-        // Just update the gain based on this commit's proportions
-        voice.gain.gain.linearRampToValueAtTime(proportion, rampEnd);
+      // Calculate total lines for this commit
+      let totalLines = 0;
+      const languageData = {};
+      ALL_LANGUAGES.forEach(lang => {
+        const lines = commit.languages[lang]?.code || 0;
+        languageData[lang] = lines;
+        totalLines += lines;
       });
 
-      // Silence unused voices (languages not present)
-      for (let i = sorted.length; i < MAX_VOICES; i++) {
-        voices[i].gain.gain.linearRampToValueAtTime(0, rampEnd);
-      }
+      // Update each voice based on its assigned language's proportion at this commit
+      ALL_LANGUAGES.forEach((lang, i) => {
+        if (i >= MAX_VOICES) return;
+        
+        const voice = voices[i];
+        const lines = languageData[lang];
+        // Proportion is per-commit: this language's lines / total lines at this commit
+        const proportion = totalLines > 0 ? lines / totalLines : 0;
+        
+        // Voice frequency never changes - only gain modulates
+        // This creates the THX-like effect where each tone independently fades in/out
+        voice.gain.gain.linearRampToValueAtTime(proportion, rampEnd);
+      });
 
       // Master gain with 20% volume variation based on total lines
       // Find min/max lines across all commits for scaling
