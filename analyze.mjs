@@ -1717,7 +1717,7 @@ function generateHTML(data, repoUrl) {
           <div class="audio-control-group">
             <label>Intensity Curve</label>
             <select id="intensity-curve">
-              <option value="log">Logarithmic (recommended)</option>
+              <option value="log" selected>Logarithmic (recommended)</option>
               <option value="linear">Linear</option>
               <option value="exp">Exponential</option>
             </select>
@@ -2407,6 +2407,7 @@ function generateHTML(data, repoUrl) {
         initAudio();
       }
 
+      const wasEnabled = soundEnabled;
       soundEnabled = !soundEnabled;
 
       // Update UI
@@ -2417,6 +2418,13 @@ function generateHTML(data, repoUrl) {
       // Resume audio context if needed (browser autoplay policy)
       if (soundEnabled) {
         resumeAudioContext();
+        
+        // Fade in from silence to prevent clicks/pops
+        if (!wasEnabled && masterGain) {
+          const now = audioCtx.currentTime;
+          masterGain.gain.setValueAtTime(0, now);
+          // Will be ramped up in updateAudio() call below
+        }
       }
       
       // Update audio immediately to reflect new enabled state
