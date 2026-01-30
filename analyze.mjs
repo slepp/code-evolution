@@ -1060,6 +1060,64 @@ function generateHTML(data, repoUrl) {
       color: var(--text-primary);
     }
 
+    .sound-control {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      margin-left: 0.5rem;
+      padding-left: 0.5rem;
+      border-left: 1px solid var(--border-default);
+    }
+
+    .sound-control.hidden {
+      display: none;
+    }
+
+    .sound-btn {
+      padding: 0.35rem 0.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .sound-btn.active {
+      background: var(--accent-purple);
+      border-color: var(--accent-purple);
+      color: white;
+    }
+
+    .sound-icon {
+      display: block;
+    }
+
+    #sound-volume {
+      width: 60px;
+      height: 4px;
+      -webkit-appearance: none;
+      appearance: none;
+      background: var(--bg-tertiary);
+      border-radius: 2px;
+      cursor: pointer;
+    }
+
+    #sound-volume::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 12px;
+      height: 12px;
+      background: var(--accent-cyan);
+      border-radius: 50%;
+      cursor: pointer;
+    }
+
+    #sound-volume::-moz-range-thumb {
+      width: 12px;
+      height: 12px;
+      background: var(--accent-cyan);
+      border-radius: 50%;
+      cursor: pointer;
+      border: none;
+    }
+
     .empty-state {
       text-align: center;
       padding: 2rem;
@@ -1248,6 +1306,17 @@ function generateHTML(data, repoUrl) {
               <option value="4">4x</option>
             </select>
           </div>
+          <div class="sound-control" id="sound-control">
+            <button id="sound-toggle" class="secondary sound-btn" title="Toggle sound">
+              <svg class="sound-icon sound-off" viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>
+              </svg>
+              <svg class="sound-icon sound-on" viewBox="0 0 24 24" width="18" height="18" fill="currentColor" style="display:none">
+                <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+              </svg>
+            </button>
+            <input type="range" id="sound-volume" min="0" max="100" value="70" title="Volume">
+          </div>
         </div>
 
         <div class="timeline">
@@ -1323,6 +1392,22 @@ function generateHTML(data, repoUrl) {
     const baseFrameDelay = Math.min(MAX_FRAME_DELAY, Math.max(MIN_FRAME_DELAY, Math.floor(TARGET_DURATION_MS / DATA.length)));
     let speedMultiplier = 1;
 
+    // Audio sonification
+    const AUDIO_SUPPORTED = !!(window.AudioContext || window.webkitAudioContext);
+    const FUNDAMENTAL_FREQ = 110;      // A2 - bass foundation
+    const FILTER_CUTOFF = 2500;        // Hz - saw brightness cap
+    const FILTER_Q_BASE = 1;           // Resonance minimum
+    const FILTER_Q_MAX = 8;            // Resonance at max intensity
+    const RAMP_TIME_MS = 50;           // Smooth parameter transitions
+    const MAX_VOICES = 16;             // Limit oscillators (matches color palette)
+    const MAX_EXPECTED_LINES = 1000000; // Normalize intensity against
+
+    let audioCtx = null;
+    let soundEnabled = false;
+    let masterGain = null;
+    let filter = null;
+    let voices = [];
+
     // Data visualization color palette - vivid, distinct colors
     const LANGUAGE_COLORS = {};
     const colorPalette = [
@@ -1348,6 +1433,11 @@ function generateHTML(data, repoUrl) {
       speed: document.getElementById('speed'),
       timeline: document.getElementById('timeline-progress'),
       timelineBar: document.querySelector('.timeline-bar'),
+      soundControl: document.getElementById('sound-control'),
+      soundToggle: document.getElementById('sound-toggle'),
+      soundVolume: document.getElementById('sound-volume'),
+      soundIconOff: document.querySelector('.sound-off'),
+      soundIconOn: document.querySelector('.sound-on'),
       totalLines: document.getElementById('total-lines'),
       totalDelta: document.getElementById('total-delta'),
       totalFiles: document.getElementById('total-files'),
@@ -1526,7 +1616,115 @@ function generateHTML(data, repoUrl) {
       lastChartIndex = currentIndex;
       chart.update('none'); // No animation for smoother playback
     }
-    
+
+    // Audio sonification functions
+    function initAudio() {
+      if (audioCtx) return;
+
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+      // Create master gain
+      masterGain = audioCtx.createGain();
+      masterGain.gain.value = 0;
+      masterGain.connect(audioCtx.destination);
+
+      // Create shared lowpass filter
+      filter = audioCtx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = FILTER_CUTOFF;
+      filter.Q.value = FILTER_Q_BASE;
+      filter.connect(masterGain);
+
+      // Create voice pool (oscillator + individual gain per voice)
+      for (let i = 0; i < MAX_VOICES; i++) {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+
+        osc.type = 'sawtooth';
+        osc.frequency.value = FUNDAMENTAL_FREQ * (i + 1);
+        gain.gain.value = 0;
+
+        osc.connect(gain);
+        gain.connect(filter);
+        osc.start();
+
+        voices.push({ osc, gain });
+      }
+    }
+
+    function updateAudio() {
+      if (!soundEnabled || !audioCtx) return;
+
+      const now = audioCtx.currentTime;
+      const rampEnd = now + (RAMP_TIME_MS / 1000);
+      const commit = DATA[currentIndex];
+
+      // Sort languages by code lines (descending) to assign harmonic ranks
+      const sorted = ALL_LANGUAGES
+        .map(lang => ({ lang, lines: commit.languages[lang]?.code || 0 }))
+        .sort((a, b) => b.lines - a.lines);
+
+      const totalLines = sorted.reduce((sum, l) => sum + l.lines, 0);
+
+      // Update each voice based on rank
+      sorted.forEach((item, rank) => {
+        if (rank >= MAX_VOICES) return;
+
+        const voice = voices[rank];
+        const proportion = totalLines > 0 ? item.lines / totalLines : 0;
+        const freq = FUNDAMENTAL_FREQ * (rank + 1);
+
+        voice.osc.frequency.linearRampToValueAtTime(freq, rampEnd);
+        voice.gain.gain.linearRampToValueAtTime(proportion * 0.8, rampEnd);
+      });
+
+      // Silence unused voices
+      for (let i = sorted.length; i < MAX_VOICES; i++) {
+        voices[i].gain.gain.linearRampToValueAtTime(0, rampEnd);
+      }
+
+      // Update intensity (master gain + filter Q)
+      const intensity = Math.min(1, totalLines / MAX_EXPECTED_LINES);
+      const volume = elements.soundVolume.value / 100;
+      masterGain.gain.linearRampToValueAtTime(intensity * volume * 0.7, rampEnd);
+      filter.Q.linearRampToValueAtTime(FILTER_Q_BASE + intensity * FILTER_Q_MAX, rampEnd);
+    }
+
+    function startAudio() {
+      if (!audioCtx) return;
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+      updateAudio();
+    }
+
+    function stopAudio() {
+      if (!audioCtx || !masterGain) return;
+      const now = audioCtx.currentTime;
+      masterGain.gain.linearRampToValueAtTime(0, now + 0.05);
+    }
+
+    function toggleSound() {
+      if (!AUDIO_SUPPORTED) return;
+
+      if (!audioCtx) {
+        initAudio();
+      }
+
+      soundEnabled = !soundEnabled;
+
+      // Update UI
+      elements.soundToggle.classList.toggle('active', soundEnabled);
+      elements.soundIconOff.style.display = soundEnabled ? 'none' : 'block';
+      elements.soundIconOn.style.display = soundEnabled ? 'block' : 'none';
+
+      if (soundEnabled && isPlaying) {
+        startAudio();
+      } else {
+        stopAudio();
+      }
+    }
+
     function updateDisplay() {
       if (DATA.length === 0) {
         elements.tableBody.innerHTML = '<tr><td colspan="4" class="empty-state">No data available</td></tr>';
@@ -1544,7 +1742,10 @@ function generateHTML(data, repoUrl) {
       // Update timeline
       const progress = ((currentIndex + 1) / DATA.length) * 100;
       elements.timeline.style.width = progress + '%';
-      
+
+      // Update audio sonification
+      updateAudio();
+
       // Calculate total lines of code and files
       let totalLines = 0;
       let totalFiles = 0;
@@ -1646,6 +1847,9 @@ function generateHTML(data, repoUrl) {
       elements.playPause.textContent = 'Pause';
       elements.playPause.classList.remove('primary');
 
+      // Start audio if enabled
+      if (soundEnabled) startAudio();
+
       const effectiveDelay = Math.max(MIN_FRAME_DELAY, Math.floor(baseFrameDelay / speedMultiplier));
       animationInterval = setInterval(() => {
         currentIndex++;
@@ -1665,6 +1869,8 @@ function generateHTML(data, repoUrl) {
         clearInterval(animationInterval);
         animationInterval = null;
       }
+      // Stop audio
+      stopAudio();
     }
     
     function next() {
@@ -1709,7 +1915,21 @@ function generateHTML(data, repoUrl) {
         play();
       }
     });
-    
+
+    // Sound controls
+    if (AUDIO_SUPPORTED) {
+      elements.soundToggle.addEventListener('click', toggleSound);
+      elements.soundVolume.addEventListener('input', () => {
+        if (soundEnabled && masterGain) {
+          const volume = elements.soundVolume.value / 100;
+          masterGain.gain.linearRampToValueAtTime(volume * 0.7, audioCtx.currentTime + 0.05);
+        }
+      });
+    } else {
+      // Hide sound controls if Web Audio not supported
+      elements.soundControl.classList.add('hidden');
+    }
+
     // Keyboard controls
     document.addEventListener('keydown', (e) => {
       if (e.code === 'Space') {
