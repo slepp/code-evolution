@@ -21,7 +21,6 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'fs
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const FRAME_DELAY_MS = 200;
 const SCHEMA_VERSION = '2.0';
 
 // =============================================================================
@@ -1078,18 +1077,29 @@ function generateHTML(data, repoUrl) {
 
     .timeline-bar {
       width: 100%;
-      height: 6px;
+      height: 8px;
       background: var(--bg-tertiary);
-      border-radius: 3px;
+      border-radius: 4px;
       overflow: hidden;
+      cursor: pointer;
+      position: relative;
+    }
+
+    .timeline-bar:hover {
+      height: 10px;
+    }
+
+    .timeline-bar:active {
+      cursor: grabbing;
     }
 
     .timeline-progress {
       height: 100%;
       background: linear-gradient(90deg, var(--accent-cyan) 0%, var(--accent-purple) 100%);
-      border-radius: 3px;
-      transition: width 0.2s var(--ease-out);
+      border-radius: 4px;
+      transition: width 0.1s linear;
       position: relative;
+      pointer-events: none;
     }
 
     .timeline-progress::after {
@@ -1232,10 +1242,10 @@ function generateHTML(data, repoUrl) {
           <div class="speed-control">
             <label>Speed</label>
             <select id="speed">
-              <option value="500">0.5x</option>
-              <option value="200" selected>1x</option>
-              <option value="100">2x</option>
-              <option value="50">4x</option>
+              <option value="0.5">0.5x</option>
+              <option value="1" selected>1x</option>
+              <option value="2">2x</option>
+              <option value="4">4x</option>
             </select>
           </div>
         </div>
@@ -1302,9 +1312,16 @@ function generateHTML(data, repoUrl) {
     let currentIndex = 0;
     let isPlaying = false;
     let animationInterval = null;
-    let frameDelay = ${FRAME_DELAY_MS};
     let chart = null;
     let lastChartIndex = -1; // Track last chart update index for incremental updates
+    let isSeeking = false; // Track if user is dragging timeline
+
+    // Dynamic frame delay: 20 second max playback at 1x, max 500ms per frame, min 50ms
+    const TARGET_DURATION_MS = 20000;
+    const MAX_FRAME_DELAY = 500;
+    const MIN_FRAME_DELAY = 50;
+    const baseFrameDelay = Math.min(MAX_FRAME_DELAY, Math.max(MIN_FRAME_DELAY, Math.floor(TARGET_DURATION_MS / DATA.length)));
+    let speedMultiplier = 1;
 
     // Data visualization color palette - vivid, distinct colors
     const LANGUAGE_COLORS = {};
@@ -1330,6 +1347,7 @@ function generateHTML(data, repoUrl) {
       reset: document.getElementById('reset'),
       speed: document.getElementById('speed'),
       timeline: document.getElementById('timeline-progress'),
+      timelineBar: document.querySelector('.timeline-bar'),
       totalLines: document.getElementById('total-lines'),
       totalDelta: document.getElementById('total-delta'),
       totalFiles: document.getElementById('total-files'),
@@ -1628,6 +1646,7 @@ function generateHTML(data, repoUrl) {
       elements.playPause.textContent = 'Pause';
       elements.playPause.classList.remove('primary');
 
+      const effectiveDelay = Math.max(MIN_FRAME_DELAY, Math.floor(baseFrameDelay / speedMultiplier));
       animationInterval = setInterval(() => {
         currentIndex++;
         if (currentIndex >= DATA.length) {
@@ -1635,7 +1654,7 @@ function generateHTML(data, repoUrl) {
           pause();
         }
         updateDisplay();
-      }, frameDelay);
+      }, effectiveDelay);
     }
 
     function pause() {
@@ -1684,7 +1703,7 @@ function generateHTML(data, repoUrl) {
     elements.goLatest.addEventListener('click', goLatest);
     
     elements.speed.addEventListener('change', (e) => {
-      frameDelay = parseInt(e.target.value);
+      speedMultiplier = parseFloat(e.target.value);
       if (isPlaying) {
         pause();
         play();
@@ -1711,7 +1730,59 @@ function generateHTML(data, repoUrl) {
         goLatest();
       }
     });
-    
+
+    // Timeline seek (click and drag)
+    function seekToPosition(e) {
+      const rect = elements.timelineBar.getBoundingClientRect();
+      const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+      const percent = x / rect.width;
+      currentIndex = Math.round(percent * (DATA.length - 1));
+      updateDisplay();
+    }
+
+    elements.timelineBar.addEventListener('click', (e) => {
+      if (!isSeeking) {
+        seekToPosition(e);
+      }
+    });
+
+    elements.timelineBar.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      isSeeking = true;
+      pause();
+      seekToPosition(e);
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (isSeeking) {
+        seekToPosition(e);
+      }
+    });
+
+    document.addEventListener('mouseup', () => {
+      isSeeking = false;
+    });
+
+    // Touch support for mobile
+    elements.timelineBar.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      isSeeking = true;
+      pause();
+      const touch = e.touches[0];
+      seekToPosition(touch);
+    }, { passive: false });
+
+    document.addEventListener('touchmove', (e) => {
+      if (isSeeking) {
+        const touch = e.touches[0];
+        seekToPosition(touch);
+      }
+    });
+
+    document.addEventListener('touchend', () => {
+      isSeeking = false;
+    });
+
     // Initialize
     initChart();
     updateDisplay();
