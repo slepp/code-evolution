@@ -1304,6 +1304,7 @@ function generateHTML(data, repoUrl) {
     let animationInterval = null;
     let frameDelay = ${FRAME_DELAY_MS};
     let chart = null;
+    let lastChartIndex = -1; // Track last chart update index for incremental updates
 
     // Data visualization color palette - vivid, distinct colors
     const LANGUAGE_COLORS = {};
@@ -1482,28 +1483,29 @@ function generateHTML(data, repoUrl) {
     function updateChart() {
       if (!chart) return;
       
-      // Update data up to current index
-      const labels = [];
-      const dataByLanguage = {};
-      
-      ALL_LANGUAGES.forEach(lang => {
-        dataByLanguage[lang] = [];
-      });
-      
-      for (let i = 0; i <= currentIndex; i++) {
-        labels.push(i + 1);
-        
-        ALL_LANGUAGES.forEach(lang => {
-          const stats = DATA[i].languages[lang];
-          dataByLanguage[lang].push(stats ? stats.code : 0);
+      // Reset if going backwards (e.g., user clicked reset or moved timeline back)
+      if (currentIndex < lastChartIndex) {
+        lastChartIndex = -1;
+        chart.data.labels = [];
+        chart.data.datasets.forEach(dataset => {
+          dataset.data = [];
         });
       }
       
-      chart.data.labels = labels;
-      chart.data.datasets.forEach((dataset, idx) => {
-        dataset.data = dataByLanguage[ALL_LANGUAGES[idx]];
-      });
+      // Optimized O(n) incremental update - only add new data points
+      if (currentIndex > lastChartIndex) {
+        for (let i = lastChartIndex + 1; i <= currentIndex; i++) {
+          chart.data.labels.push(i + 1);
+          
+          chart.data.datasets.forEach((dataset, idx) => {
+            const lang = ALL_LANGUAGES[idx];
+            const stats = DATA[i].languages[lang];
+            dataset.data.push(stats ? stats.code : 0);
+          });
+        }
+      }
       
+      lastChartIndex = currentIndex;
       chart.update('none'); // No animation for smoother playback
     }
     
