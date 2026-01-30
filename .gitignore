@@ -7,6 +7,9 @@ cloc-history/
 test/playwright-output/
 tests/playwright-output/
 
+# Internal documentation
+docs/
+
 # Node modules (if any future dependencies)
 node_modules/
 
