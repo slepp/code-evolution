@@ -11,6 +11,7 @@
  * - Incremental updates (only analyzes new commits)
  * - Comprehensive cloc metadata capture
  * - Performance tracking
+ * - OpenTelemetry distributed tracing support
  * 
  * Usage: node analyze.mjs <git-repo-url> [output-dir] [--force-full]
  */
@@ -22,6 +23,211 @@ import { join } from 'path';
 
 const FRAME_DELAY_MS = 200;
 const SCHEMA_VERSION = '2.0';
+
+// =============================================================================
+// OpenTelemetry Tracing (optional - only active when env vars are set)
+// =============================================================================
+
+let otelApi = null;
+let tracer = null;
+let rootSpan = null;
+let rootContext = null;
+let sdkShutdown = null;
+
+/**
+ * Initialize OpenTelemetry tracing if environment variables are set.
+ * Reads OTEL_TRACE_PARENT from parent process (worker) to continue the trace.
+ * 
+ * @returns {Promise<boolean>} True if tracing was initialized
+ */
+async function initTracing() {
+  // Check if tracing is enabled via environment
+  if (process.env.OTEL_TRACING_ENABLED !== 'true' || !process.env.OTEL_EXPORTER_OTLP_ENDPOINT) {
+    return false;
+  }
+
+  try {
+    // Dynamic imports for optional dependencies
+    const [
+      { trace, context, SpanKind, SpanStatusCode },
+      { NodeSDK },
+      { OTLPTraceExporter },
+      { Resource },
+      { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION },
+      { BatchSpanProcessor },
+    ] = await Promise.all([
+      import('@opentelemetry/api'),
+      import('@opentelemetry/sdk-node'),
+      import('@opentelemetry/exporter-trace-otlp-http'),
+      import('@opentelemetry/resources'),
+      import('@opentelemetry/semantic-conventions'),
+      import('@opentelemetry/sdk-trace-node'),
+    ]);
+
+    otelApi = { trace, context, SpanKind, SpanStatusCode };
+
+    // Configure OTLP exporter
+    const exporter = new OTLPTraceExporter({
+      url: `${process.env.OTEL_EXPORTER_OTLP_ENDPOINT}/v1/traces`,
+    });
+
+    // Create resource with service info
+    const resource = new Resource({
+      [ATTR_SERVICE_NAME]: 'cloc-history-analyzer',
+      [ATTR_SERVICE_VERSION]: SCHEMA_VERSION,
+    });
+
+    // Initialize SDK
+    const sdk = new NodeSDK({
+      resource,
+      spanProcessor: new BatchSpanProcessor(exporter),
+    });
+
+    sdk.start();
+    sdkShutdown = () => sdk.shutdown();
+
+    // Get tracer
+    tracer = trace.getTracer('cloc-history-analyzer', SCHEMA_VERSION);
+
+    // Parse parent trace context from environment (injected by worker)
+    const parentContext = parseTraceParent(process.env.OTEL_TRACE_PARENT);
+    
+    if (parentContext) {
+      // Create parent span context to continue the trace
+      const parentSpanContext = {
+        traceId: parentContext.traceId,
+        spanId: parentContext.spanId,
+        traceFlags: parentContext.traceFlags,
+        isRemote: true,
+      };
+
+      // Set parent context and start root span as child
+      const ctx = trace.setSpanContext(context.active(), parentSpanContext);
+      rootSpan = tracer.startSpan('analyzer.run', {
+        kind: SpanKind.INTERNAL,
+      }, ctx);
+      rootContext = trace.setSpan(ctx, rootSpan);
+    } else {
+      // No parent context, start new root span
+      rootSpan = tracer.startSpan('analyzer.run', {
+        kind: SpanKind.INTERNAL,
+      });
+      rootContext = trace.setSpan(context.active(), rootSpan);
+    }
+
+    return true;
+  } catch (err) {
+    // OTel packages not installed or initialization failed - continue without tracing
+    if (process.env.DEBUG) {
+      console.error('Tracing initialization failed:', err.message);
+    }
+    return false;
+  }
+}
+
+/**
+ * Parse W3C traceparent header format
+ * Format: version-traceid-spanid-flags (e.g., "00-abc123...-def456...-01")
+ * 
+ * @param {string} traceparent - W3C traceparent string
+ * @returns {{ traceId: string, spanId: string, traceFlags: number } | null}
+ */
+function parseTraceParent(traceparent) {
+  if (!traceparent) return null;
+
+  const parts = traceparent.split('-');
+  if (parts.length !== 4) return null;
+
+  const [version, traceId, spanId, flags] = parts;
+  
+  // Validate version (only 00 supported)
+  if (version !== '00') return null;
+  
+  // Validate trace ID (32 hex chars, not all zeros)
+  if (!/^[0-9a-f]{32}$/.test(traceId) || traceId === '00000000000000000000000000000000') {
+    return null;
+  }
+  
+  // Validate span ID (16 hex chars, not all zeros)
+  if (!/^[0-9a-f]{16}$/.test(spanId) || spanId === '0000000000000000') {
+    return null;
+  }
+
+  return {
+    traceId,
+    spanId,
+    traceFlags: parseInt(flags, 16),
+  };
+}
+
+/**
+ * Create a child span for an operation
+ * Returns a no-op span object if tracing is not initialized
+ * 
+ * @param {string} name - Span name
+ * @param {object} attributes - Span attributes
+ * @returns {{ span: object, end: function, setAttributes: function, setStatus: function, recordException: function }}
+ */
+function startSpan(name, attributes = {}) {
+  if (!tracer || !otelApi) {
+    // Return no-op span
+    return {
+      span: null,
+      end: () => {},
+      setAttributes: () => {},
+      setStatus: () => {},
+      recordException: () => {},
+      addEvent: () => {},
+    };
+  }
+
+  const span = tracer.startSpan(name, {
+    kind: otelApi.SpanKind.INTERNAL,
+    attributes,
+  }, rootContext);
+
+  return {
+    span,
+    end: () => span.end(),
+    setAttributes: (attrs) => {
+      for (const [key, value] of Object.entries(attrs)) {
+        span.setAttribute(key, value);
+      }
+    },
+    setStatus: (code, message) => {
+      span.setStatus({ 
+        code: code === 'error' ? otelApi.SpanStatusCode.ERROR : otelApi.SpanStatusCode.OK,
+        message,
+      });
+    },
+    recordException: (err) => span.recordException(err),
+    addEvent: (name, attrs) => span.addEvent(name, attrs),
+  };
+}
+
+/**
+ * Shutdown tracing and flush spans
+ */
+async function shutdownTracing(success = true) {
+  if (rootSpan && otelApi) {
+    rootSpan.setStatus({ 
+      code: success ? otelApi.SpanStatusCode.OK : otelApi.SpanStatusCode.ERROR,
+    });
+    rootSpan.end();
+  }
+
+  if (sdkShutdown) {
+    try {
+      await sdkShutdown();
+    } catch (err) {
+      // Ignore shutdown errors
+    }
+  }
+}
+
+// =============================================================================
+// End OpenTelemetry Tracing
+// =============================================================================
 
 // Global flag for JSON progress output
 let JSON_PROGRESS = false;
@@ -64,62 +270,94 @@ function exec(cmd, options = {}) {
 }
 
 function cloneRepo(repoUrl, targetDir) {
+  const span = startSpan('analyzer.clone', {
+    'git.repository.url': repoUrl,
+    'git.clone.target_dir': targetDir,
+  });
+
   if (!JSON_PROGRESS) {
     console.log(`\n📦 Cloning repository: ${repoUrl}`);
   }
   emitProgress('cloning', 5, `Cloning repository: ${repoUrl}`);
   
-  exec(`git clone "${repoUrl}" "${targetDir}"`);
-  
-  if (!JSON_PROGRESS) {
-    console.log('✓ Clone complete');
+  try {
+    exec(`git clone "${repoUrl}" "${targetDir}"`);
+    
+    if (!JSON_PROGRESS) {
+      console.log('✓ Clone complete');
+    }
+    emitProgress('cloning', 10, 'Clone complete');
+    span.setStatus('ok');
+  } catch (err) {
+    span.setStatus('error', err.message);
+    span.recordException(err);
+    throw err;
+  } finally {
+    span.end();
   }
-  emitProgress('cloning', 10, 'Clone complete');
 }
 
 function getCommitHistory(repoDir, branch = 'main', afterCommit = null) {
+  const span = startSpan('analyzer.get_commits', {
+    'git.branch': branch,
+    'git.after_commit': afterCommit || 'none',
+  });
+
   const label = afterCommit ? 'new commits' : 'commit history';
   if (!JSON_PROGRESS) {
     console.log(`\n📜 Getting ${label} from branch: ${branch}`);
   }
   
-  // Try main first, fall back to master
-  const branches = exec(`git -C "${repoDir}" branch -r`, { silent: true });
-  const hasMain = branches.includes('origin/main');
-  const hasMaster = branches.includes('origin/master');
-  
-  let actualBranch = branch;
-  if (branch === 'main' && !hasMain && hasMaster) {
-    actualBranch = 'master';
-    if (!JSON_PROGRESS) {
-      console.log('  (using master branch instead)');
+  try {
+    // Try main first, fall back to master
+    const branches = exec(`git -C "${repoDir}" branch -r`, { silent: true });
+    const hasMain = branches.includes('origin/main');
+    const hasMaster = branches.includes('origin/master');
+    
+    let actualBranch = branch;
+    if (branch === 'main' && !hasMain && hasMaster) {
+      actualBranch = 'master';
+      if (!JSON_PROGRESS) {
+        console.log('  (using master branch instead)');
+      }
     }
+    
+    span.setAttributes({ 'git.actual_branch': actualBranch });
+    
+    // Get commits in chronological order (oldest first)
+    // If afterCommit is provided, only get commits after that hash
+    let logCmd = `git -C "${repoDir}" log ${actualBranch} --reverse --pretty=format:"%H|%ad|%s" --date=short`;
+    if (afterCommit) {
+      logCmd = `git -C "${repoDir}" log ${afterCommit}..${actualBranch} --reverse --pretty=format:"%H|%ad|%s" --date=short`;
+    }
+    
+    const commits = exec(logCmd, { silent: true, ignoreError: true })
+      .split('\n')
+      .filter(line => line.trim());
+    
+    if (!JSON_PROGRESS) {
+      console.log(`✓ Found ${commits.length} commits`);
+    }
+    emitProgress('analyzing', 12, `Found ${commits.length} commits`, { total_commits: commits.length });
+    
+    span.setAttributes({ 'git.commits.count': commits.length });
+    span.setStatus('ok');
+    
+    return commits.map(line => {
+      const [hash, date, ...messageParts] = line.split('|');
+      return {
+        hash: hash.trim(),
+        date: date.trim(),
+        message: messageParts.join('|').trim()
+      };
+    });
+  } catch (err) {
+    span.setStatus('error', err.message);
+    span.recordException(err);
+    throw err;
+  } finally {
+    span.end();
   }
-  
-  // Get commits in chronological order (oldest first)
-  // If afterCommit is provided, only get commits after that hash
-  let logCmd = `git -C "${repoDir}" log ${actualBranch} --reverse --pretty=format:"%H|%ad|%s" --date=short`;
-  if (afterCommit) {
-    logCmd = `git -C "${repoDir}" log ${afterCommit}..${actualBranch} --reverse --pretty=format:"%H|%ad|%s" --date=short`;
-  }
-  
-  const commits = exec(logCmd, { silent: true, ignoreError: true })
-    .split('\n')
-    .filter(line => line.trim());
-  
-  if (!JSON_PROGRESS) {
-    console.log(`✓ Found ${commits.length} commits`);
-  }
-  emitProgress('analyzing', 12, `Found ${commits.length} commits`, { total_commits: commits.length });
-  
-  return commits.map(line => {
-    const [hash, date, ...messageParts] = line.split('|');
-    return {
-      hash: hash.trim(),
-      date: date.trim(),
-      message: messageParts.join('|').trim()
-    };
-  });
 }
 
 function runCloc(repoDir) {
@@ -186,6 +424,11 @@ function runCloc(repoDir) {
 }
 
 function analyzeCommits(repoDir, commits, existingResults = []) {
+  const span = startSpan('analyzer.analyze_commits', {
+    'analyzer.commits.new': commits.length,
+    'analyzer.commits.existing': existingResults.length,
+  });
+
   if (!JSON_PROGRESS) {
     console.log(`\n🔍 Analyzing ${commits.length} commits...\n`);
   }
@@ -201,84 +444,99 @@ function analyzeCommits(repoDir, commits, existingResults = []) {
   const startTime = Date.now();
   const totalCommits = commits.length;
   
-  for (let i = 0; i < commits.length; i++) {
-    const commit = commits[i];
-    const progress = `[${i + 1}/${commits.length}]`;
-    
-    // Calculate progress percentage (15% to 85% of total progress)
-    const commitProgress = 15 + Math.floor((i / totalCommits) * 70);
-    
-    if (!JSON_PROGRESS) {
-      process.stdout.write(`${progress} ${commit.hash.substring(0, 8)} (${commit.date})...`);
+  try {
+    for (let i = 0; i < commits.length; i++) {
+      const commit = commits[i];
+      const progress = `[${i + 1}/${commits.length}]`;
+      
+      // Calculate progress percentage (15% to 85% of total progress)
+      const commitProgress = 15 + Math.floor((i / totalCommits) * 70);
+      
+      if (!JSON_PROGRESS) {
+        process.stdout.write(`${progress} ${commit.hash.substring(0, 8)} (${commit.date})...`);
+      }
+      
+      emitProgress('analyzing', commitProgress, `Analyzing commit ${i + 1} of ${totalCommits}`, {
+        current_commit: i + 1,
+        total_commits: totalCommits,
+        commit_hash: commit.hash.substring(0, 8),
+        commit_date: commit.date
+      });
+      
+      // Checkout commit
+      exec(`git -C "${repoDir}" checkout -q ${commit.hash}`, { silent: true });
+      
+      // Run cloc
+      const clocData = runCloc(repoDir);
+      
+      // Track all languages we've seen
+      Object.keys(clocData.languages).forEach(lang => allLanguages.add(lang));
+      
+      results.push({
+        commit: commit.hash,
+        date: commit.date,
+        message: commit.message,
+        analysis: clocData.analysis,
+        languages: clocData.languages
+      });
+      
+      if (!JSON_PROGRESS) {
+        process.stdout.write(' ✓\n');
+      }
     }
     
-    emitProgress('analyzing', commitProgress, `Analyzing commit ${i + 1} of ${totalCommits}`, {
-      current_commit: i + 1,
-      total_commits: totalCommits,
-      commit_hash: commit.hash.substring(0, 8),
-      commit_date: commit.date
+    const elapsedSeconds = (Date.now() - startTime) / 1000;
+    
+    if (commits.length > 0) {
+      if (!JSON_PROGRESS) {
+        console.log(`\n✓ Analysis complete (${elapsedSeconds.toFixed(2)}s)`);
+        console.log(`📊 Languages found: ${Array.from(allLanguages).sort().join(', ')}`);
+      }
+      emitProgress('analyzing', 85, 'Analysis complete', {
+        elapsed_seconds: elapsedSeconds,
+        languages: Array.from(allLanguages).sort()
+      });
+    }
+    
+    // Calculate stable sort order based on final commit
+    const finalCommit = results[results.length - 1];
+    let totalLinesInFinal = 0;
+    for (const lang in finalCommit.languages) {
+      totalLinesInFinal += finalCommit.languages[lang].code;
+    }
+    
+    // Sort languages by their percentage in the final commit
+    const languageOrder = Array.from(allLanguages).sort((a, b) => {
+      const linesA = finalCommit.languages[a]?.code || 0;
+      const linesB = finalCommit.languages[b]?.code || 0;
+      const percA = totalLinesInFinal > 0 ? (linesA / totalLinesInFinal) : 0;
+      const percB = totalLinesInFinal > 0 ? (linesB / totalLinesInFinal) : 0;
+      
+      if (percB !== percA) {
+        return percB - percA; // Descending by percentage
+      }
+      return a.localeCompare(b); // Alphabetical tie-breaker
     });
     
-    // Checkout commit
-    exec(`git -C "${repoDir}" checkout -q ${commit.hash}`, { silent: true });
-    
-    // Run cloc
-    const clocData = runCloc(repoDir);
-    
-    // Track all languages we've seen
-    Object.keys(clocData.languages).forEach(lang => allLanguages.add(lang));
-    
-    results.push({
-      commit: commit.hash,
-      date: commit.date,
-      message: commit.message,
-      analysis: clocData.analysis,
-      languages: clocData.languages
+    span.setAttributes({
+      'analyzer.languages.count': allLanguages.size,
+      'analyzer.total_lines': totalLinesInFinal,
+      'analyzer.duration_seconds': elapsedSeconds,
     });
+    span.setStatus('ok');
     
-    if (!JSON_PROGRESS) {
-      process.stdout.write(' ✓\n');
-    }
+    return {
+      results,
+      allLanguages: languageOrder,
+      analysisTime: elapsedSeconds
+    };
+  } catch (err) {
+    span.setStatus('error', err.message);
+    span.recordException(err);
+    throw err;
+  } finally {
+    span.end();
   }
-  
-  const elapsedSeconds = (Date.now() - startTime) / 1000;
-  
-  if (commits.length > 0) {
-    if (!JSON_PROGRESS) {
-      console.log(`\n✓ Analysis complete (${elapsedSeconds.toFixed(2)}s)`);
-      console.log(`📊 Languages found: ${Array.from(allLanguages).sort().join(', ')}`);
-    }
-    emitProgress('analyzing', 85, 'Analysis complete', {
-      elapsed_seconds: elapsedSeconds,
-      languages: Array.from(allLanguages).sort()
-    });
-  }
-  
-  // Calculate stable sort order based on final commit
-  const finalCommit = results[results.length - 1];
-  let totalLinesInFinal = 0;
-  for (const lang in finalCommit.languages) {
-    totalLinesInFinal += finalCommit.languages[lang].code;
-  }
-  
-  // Sort languages by their percentage in the final commit
-  const languageOrder = Array.from(allLanguages).sort((a, b) => {
-    const linesA = finalCommit.languages[a]?.code || 0;
-    const linesB = finalCommit.languages[b]?.code || 0;
-    const percA = totalLinesInFinal > 0 ? (linesA / totalLinesInFinal) : 0;
-    const percB = totalLinesInFinal > 0 ? (linesB / totalLinesInFinal) : 0;
-    
-    if (percB !== percA) {
-      return percB - percA; // Descending by percentage
-    }
-    return a.localeCompare(b); // Alphabetical tie-breaker
-  });
-  
-  return {
-    results,
-    allLanguages: languageOrder,
-    analysisTime: elapsedSeconds
-  };
 }
 
 /**
@@ -337,7 +595,13 @@ function createDataStructure(repoUrl, results, allLanguages, analysisTime, clocV
 }
 
 function generateHTML(data, repoUrl) {
-  const { results, allLanguages } = data;
+  const span = startSpan('analyzer.generate_html', {
+    'analyzer.commits.count': data.results.length,
+    'analyzer.languages.count': data.allLanguages.length,
+  });
+
+  try {
+    const { results, allLanguages } = data;
 
   const html = `<!DOCTYPE html>
 <html lang="en">
@@ -1453,7 +1717,15 @@ function generateHTML(data, repoUrl) {
 </body>
 </html>`;
 
-  return html;
+    span.setStatus('ok');
+    span.end();
+    return html;
+  } catch (err) {
+    span.setStatus('error', err.message);
+    span.recordException(err);
+    span.end();
+    throw err;
+  }
 }
 
 function escapeHtml(text) {
@@ -1465,7 +1737,7 @@ function escapeHtml(text) {
     .replace(/'/g, '&#039;');
 }
 
-function main() {
+async function main() {
   const args = process.argv.slice(2);
   
   if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
@@ -1485,6 +1757,11 @@ Arguments:
   --force-full      Force full analysis, ignore existing data
   --json-progress   Output progress as JSONL to stderr for machine parsing
   --local-repo      Path to already cloned repository (skips cloning)
+
+Environment Variables (for distributed tracing):
+  OTEL_TRACING_ENABLED        Set to 'true' to enable OpenTelemetry tracing
+  OTEL_EXPORTER_OTLP_ENDPOINT OTLP endpoint URL (e.g., http://tempo:4318)
+  OTEL_TRACE_PARENT           W3C traceparent for trace context propagation
 
 Example:
   node analyze.mjs https://github.com/user/repo
@@ -1522,6 +1799,17 @@ Incremental Updates:
     }
   }
   
+  // Initialize OpenTelemetry tracing (if enabled via environment)
+  const tracingEnabled = await initTracing();
+  if (tracingEnabled && rootSpan) {
+    rootSpan.setAttribute('analyzer.repository.url', repoUrl);
+    rootSpan.setAttribute('analyzer.output_dir', outputDir);
+    rootSpan.setAttribute('analyzer.force_full', forceFull);
+    rootSpan.setAttribute('analyzer.local_repo', localRepoPath || 'none');
+  }
+  
+  let success = false;
+  
   emitProgress('validating', 0, 'Starting analysis...');
   
   if (!JSON_PROGRESS) {
@@ -1531,6 +1819,9 @@ Incremental Updates:
     console.log(`Output: ${outputDir}`);
     if (forceFull) {
       console.log('Mode: Full analysis (--force-full)');
+    }
+    if (tracingEnabled) {
+      console.log('Tracing: enabled');
     }
     console.log();
   }
@@ -1588,6 +1879,7 @@ Incremental Updates:
       if (commits.length === 0) {
         console.log('\n✅ Already up to date! No new commits to analyze.');
         console.log(`\nVisualization: ${join(outputDir, 'visualization.html')}`);
+        success = true;
         return;
       }
       
@@ -1634,6 +1926,13 @@ Incremental Updates:
       console.log(`🎨 Visualization generated: ${htmlFile}`);
     }
     
+    // Update root span with final metrics
+    if (rootSpan) {
+      rootSpan.setAttribute('analyzer.total_commits', data.results.length);
+      rootSpan.setAttribute('analyzer.languages_count', data.allLanguages.length);
+      rootSpan.setAttribute('analyzer.duration_seconds', analysisData.analysisTime);
+    }
+    
     emitProgress('complete', 100, 'Analysis complete!', {
       total_commits: data.results.length,
       languages: data.allLanguages.length,
@@ -1645,6 +1944,8 @@ Incremental Updates:
       console.log(`\nOpen ${htmlFile} in a browser to view the animation.`);
     }
     
+    success = true;
+    
   } catch (error) {
     if (!JSON_PROGRESS) {
       console.error('\n❌ Error:', error.message);
@@ -1653,6 +1954,12 @@ Incremental Updates:
       error: error.message,
       stack: error.stack
     });
+    
+    // Record error on root span
+    if (rootSpan && otelApi) {
+      rootSpan.recordException(error);
+    }
+    
     process.exit(1);
   } finally {
     // Cleanup (only if we created a temp directory)
@@ -1662,7 +1969,13 @@ Incremental Updates:
       }
       rmSync(tempDir, { recursive: true, force: true });
     }
+    
+    // Shutdown tracing and flush spans
+    await shutdownTracing(success);
   }
 }
 
-main();
+main().catch((err) => {
+  console.error('Fatal error:', err);
+  process.exit(1);
+});

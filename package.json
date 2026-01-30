@@ -1,6 +1,6 @@
 {
   "name": "cloc-history-analyzer",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Visualize code evolution over time with interactive animated graphs. Analyzes git history using cloc with incremental updates.",
   "type": "module",
   "main": "analyze.mjs",
@@ -21,7 +21,9 @@
     "evolution",
     "chart",
     "graph",
-    "incremental"
+    "incremental",
+    "opentelemetry",
+    "tracing"
   ],
   "author": "Stephen Olesen <slepp@slepp.ca>",
   "license": "MIT",
@@ -37,6 +39,14 @@
     "node": ">=16.0.0"
   },
   "dependencies": {},
-  "devDependencies": {}
+  "devDependencies": {},
+  "optionalDependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/sdk-node": "^0.57.0",
+    "@opentelemetry/sdk-trace-node": "^1.30.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.57.0",
+    "@opentelemetry/resources": "^1.30.0",
+    "@opentelemetry/semantic-conventions": "^1.28.0"
+  }
 }
 
