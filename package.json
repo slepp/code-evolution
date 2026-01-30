@@ -9,7 +9,10 @@
   },
   "scripts": {
     "analyze": "node analyze.mjs",
-    "test": "./test.sh"
+    "test": "./test/run-tests.sh",
+    "test:unit": "node --test test/unit.test.mjs",
+    "test:integration": "node --test test/integration.test.mjs",
+    "test:legacy": "./test.sh"
   },
   "keywords": [
     "cloc",
