@@ -3,7 +3,7 @@
 # Example: Daily update script for CI/CD
 # Demonstrates incremental updates for fast daily metrics
 
-REPO_URL="https://github.com/kelseyhightower/nocode"
+REPO_URL="https://github.com/YOUR_USERNAME/YOUR_REPO"
 OUTPUT_DIR="./daily-metrics"
 
 echo "📊 Daily Metrics Update"

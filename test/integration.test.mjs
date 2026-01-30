@@ -19,7 +19,7 @@ const __dirname = dirname(__filename);
 const PROJECT_ROOT = join(__dirname, '..');
 
 // Test configuration
-const TEST_REPO = 'https://github.com/kelseyhightower/nocode';
+const TEST_REPO = 'https://github.com/octocat/Hello-World';
 const TEST_OUTPUT = join(PROJECT_ROOT, 'test', 'integration-output');
 
 // Helper to run analyzer
@@ -98,7 +98,7 @@ describe('Integration Tests - Full Workflow', () => {
 
       const dataAfter = JSON.parse(readFileSync(dataPath, 'utf8'));
 
-      // Should have same number of commits (no new commits in nocode repo)
+      // Should have same number of commits (stable test repo)
       assert.strictEqual(dataAfter.results.length, commitsBefore, 'Commit count should be stable');
 
       console.log(`✓ Incremental update verified (${commitsBefore} commits)`);

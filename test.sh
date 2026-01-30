@@ -1,12 +1,13 @@
 #!/bin/bash
 
 # Quick test script to verify the analyzer works
-# Tests on the tiny kelseyhightower/nocode repo (4 commits)
+# Tests on a small public repository
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEST_OUTPUT="/tmp/cloc-analyzer-test-$$"
+TEST_REPO="https://github.com/octocat/Hello-World"
 
 echo "🧪 Testing CLOC History Analyzer"
 echo "================================"
@@ -16,14 +17,14 @@ echo ""
 echo "Checking prerequisites..."
 command -v node >/dev/null 2>&1 || { echo "❌ Node.js not found"; exit 1; }
 command -v git >/dev/null 2>&1 || { echo "❌ git not found"; exit 1; }
-command -v cloc >/dev/null 2>&1 || { echo "❌ cloc not found"; exit 1; }
+command -v scc >/dev/null 2>&1 || command -v cloc >/dev/null 2>&1 || { echo "❌ scc or cloc not found"; exit 1; }
 echo "✓ All prerequisites found"
 echo ""
 
 # Run analyzer on small test repo
 echo "Running analyzer on test repository..."
 node "$SCRIPT_DIR/analyze.mjs" \
-  https://github.com/kelseyhightower/nocode \
+  "$TEST_REPO" \
   "$TEST_OUTPUT"
 
 echo ""

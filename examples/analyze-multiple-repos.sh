@@ -9,8 +9,9 @@ echo
 
 # Define repositories to analyze
 REPOS=(
-  "https://github.com/kelseyhightower/nocode"
-  "https://github.com/sindresorhus/is"
+  "https://github.com/YOUR_ORG/frontend"
+  "https://github.com/YOUR_ORG/backend"
+  "https://github.com/YOUR_ORG/mobile"
 )
 
 OUTPUT_DIR="./example-output"

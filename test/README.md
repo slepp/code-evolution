@@ -77,11 +77,11 @@ Tests for complete workflows:
 
 ## Test Data
 
-Integration tests use the [kelseyhightower/nocode](https://github.com/kelseyhightower/nocode) repository as a test case:
-- Small repository (4 commits)
+Integration tests use a small public GitHub repository as a test case:
+- Small repository (minimal commits)
 - Fast to clone and analyze
-- Stable history (no new commits expected)
-- Perfect for testing
+- Stable history
+- Perfect for automated testing
 
 ## Writing New Tests
 

@@ -59,10 +59,10 @@ brew install cloc      # macOS
 ./test.sh
 
 # Test on specific repository
-node analyze.mjs https://github.com/kelseyhightower/nocode ./test-output
+node analyze.mjs https://github.com/YOUR_USERNAME/YOUR_REPO ./test-output
 
 # Test incremental mode
-node analyze.mjs https://github.com/kelseyhightower/nocode ./test-output  # Second run
+node analyze.mjs https://github.com/YOUR_USERNAME/YOUR_REPO ./test-output  # Second run
 ```
 
 ### Code Style

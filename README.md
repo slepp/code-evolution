@@ -2,12 +2,7 @@
 
 > 📊 Visualize code evolution over time with interactive animated graphs
 
-Analyzes the evolution of code composition across your git repository's history by running [cloc](https://github.com/AlDanial/cloc) on every commit. Generates beautiful, interactive HTML visualizations showing how your codebase has grown and changed.
-
-<div align="center">
-  <img src="docs/screenshot.png" alt="CLOC History Analyzer Visualization" width="800">
-  <p><em>Interactive visualization showing language distribution over time with live graph updates</em></p>
-</div>
+Analyzes the evolution of code composition across your git repository's history by running **[scc](https://github.com/boyter/scc)** (default, ~80x faster) or **[cloc](https://github.com/AlDanial/cloc)** on every commit. Generates beautiful, interactive HTML visualizations showing how your codebase has grown and changed.
 
 ## ✨ Features
 
@@ -19,11 +14,13 @@ Analyzes the evolution of code composition across your git repository's history 
 - 🎯 **Smart Sorting** - Languages maintain consistent positions for easy tracking
 - 📦 **Self-Contained** - Single HTML file, no server required
 - 🚀 **Fast** - Smart caching and incremental processing
+- 🔧 **Flexible** - Choose between scc (fast) or cloc (thorough)
 
-### What's New in v2.0
-- **⚡ Incremental Processing** - Re-analyze in seconds instead of minutes
-- **📊 Enhanced Data** - Comprehensive cloc metrics per commit
-- **🔧 Schema Versioning** - Future-proof data format
+### What's New in v0.8
+- **⚡ scc Support** - Default to scc for ~80x faster analysis
+- **🎵 Audio Sonification** - Hear your code evolution (experimental)
+- **📊 Enhanced Metrics** - Complexity and bytes data (with scc)
+- **🔧 Tool Selection** - Choose scc or cloc via `--counter` flag
 - **⏱️ Performance Tracking** - Detailed timing and throughput metrics
 
 ## 🚀 Quick Start
@@ -31,10 +28,15 @@ Analyzes the evolution of code composition across your git repository's history 
 ### Prerequisites
 
 - **Node.js** v16 or higher
-- **cloc** - Install with:
-  - Ubuntu/Debian: `sudo apt install cloc`
-  - macOS: `brew install cloc`
-  - Windows: `choco install cloc`
+- **scc** (recommended, default) or **cloc**:
+  - **scc** (~80x faster):
+    - Ubuntu/Debian: `sudo snap install scc` or download from [releases](https://github.com/boyter/scc/releases)
+    - macOS: `brew install scc`
+    - Windows: `scoop install scc` or download from [releases](https://github.com/boyter/scc/releases)
+  - **cloc** (traditional, more thorough):
+    - Ubuntu/Debian: `sudo apt install cloc`
+    - macOS: `brew install cloc`
+    - Windows: `choco install cloc`
 - **git** - For repository cloning
 
 ### Installation
@@ -51,8 +53,11 @@ chmod +x analyze.mjs
 ### Basic Usage
 
 ```bash
-# Analyze a repository
+# Analyze a repository (uses scc by default)
 node analyze.mjs https://github.com/facebook/react
+
+# Use cloc instead of scc
+node analyze.mjs https://github.com/facebook/react ./output --counter cloc
 
 # Specify output directory
 node analyze.mjs https://github.com/torvalds/linux ./linux-analysis
@@ -65,7 +70,7 @@ node analyze.mjs https://github.com/facebook/react ./react-analysis
 
 Two files are generated in the output directory:
 
-1. **`data.json`** - Complete analysis data (v2.0 format with metadata)
+1. **`data.json`** - Complete analysis data (schema v2.2 with metadata)
 2. **`visualization.html`** - Interactive visualization (open in any browser)
 
 ## 📊 Example Visualization
@@ -81,7 +86,7 @@ The generated HTML includes:
 
 ## ⚡ Incremental Updates
 
-Version 2.0 introduces **blazing fast incremental updates**:
+Version 0.8 introduces **blazing fast incremental updates**:
 
 ```bash
 # First run: analyzes all 1000 commits (~15 minutes)
@@ -98,15 +103,6 @@ node analyze.mjs https://github.com/large-project/repo ./output
 - 100x+ faster for small updates
 - Perfect for CI/CD pipelines
 - Daily dashboard updates in seconds
-
-## 📖 Documentation
-
-- **[Quick Start Guide](docs/QUICKSTART.md)** - Get started in 2 minutes
-- **[User Guide](docs/README.md)** - Complete feature documentation
-- **[Incremental Updates](docs/INCREMENTAL.md)** - Deep dive on v2.0 incremental mode
-- **[Examples](docs/EXAMPLE.md)** - Real-world usage examples
-- **[Changelog](docs/CHANGELOG.md)** - Version history and technical details
-- **[UI Updates](docs/UI-UPDATES.md)** - Visualization features
 
 ## 🎯 Use Cases
 
@@ -144,6 +140,24 @@ Document transitions like "migrated from JavaScript to TypeScript" with visual p
 
 ## 🛠️ Advanced Usage
 
+### Tool Selection
+
+Choose between scc (fast) or cloc (thorough):
+
+```bash
+# Use scc (default, ~80x faster)
+node analyze.mjs <repo-url> <output-dir>
+
+# Use cloc (traditional, more language mappings)
+node analyze.mjs <repo-url> <output-dir> --counter cloc
+```
+
+**Tool Comparison:**
+- **scc**: Succinct Code Counter (Go), very fast, includes complexity & bytes
+- **cloc**: Count Lines of Code (Perl), traditional, broader language support
+
+Both provide: files, code lines, blank lines, comment lines
+
 ### Force Full Re-analysis
 
 ```bash
@@ -152,16 +166,16 @@ node analyze.mjs <repo-url> <output-dir> --force-full
 ```
 
 Useful when:
-- Upgrading cloc versions
+- Upgrading counter tool versions
 - Changing exclusion patterns
-- Migrating from v1.0 to v2.0
+- Switching between scc and cloc
 
 ### Custom Exclusions
 
-Edit `analyze.mjs` line 76 to modify excluded directories:
+Edit `analyze.mjs` line 238 to modify excluded directories:
 
 ```javascript
---exclude-dir=node_modules,.git,dist,build,target,pkg,vendor
+const EXCLUDE_DIRS = ['node_modules', '.git', 'dist', 'build', 'target', 'pkg', '.venv', 'venv', '__pycache__', '.pytest_cache', '.mypy_cache', 'vendor'];
 ```
 
 ### Keyboard Shortcuts in Visualization
@@ -173,17 +187,18 @@ Edit `analyze.mjs` line 76 to modify excluded directories:
 
 ## 📊 Data Format
 
-Version 2.0 uses an enhanced schema with metadata:
+Version 0.8 uses schema v2.2 with enhanced metadata:
 
 ```json
 {
-  "schema_version": "2.0",
+  "schema_version": "2.2",
   "metadata": {
     "repository_url": "https://github.com/user/repo",
     "analyzed_at": "2024-01-30T12:34:56Z",
     "total_commits": 1245,
     "total_duration_seconds": 876.45,
-    "cloc_version": "2.04",
+    "counter_tool": "scc",
+    "counter_version": "3.x",
     "last_commit_hash": "abc123...",
     "last_commit_date": "2024-01-30"
   },
@@ -191,8 +206,6 @@ Version 2.0 uses an enhanced schema with metadata:
   "allLanguages": [ /* sorted by prevalence */ ]
 }
 ```
-
-See [INCREMENTAL.md](docs/INCREMENTAL.md) for complete schema documentation.
 
 ## 🧪 Testing
 
@@ -228,13 +241,12 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 ## 🙏 Acknowledgments
 
-- **[cloc](https://github.com/AlDanial/cloc)** by Al Danial - The amazing tool that powers this analyzer
+- **[scc](https://github.com/boyter/scc)** by Ben Boyter - Blazing fast code counter
+- **[cloc](https://github.com/AlDanial/cloc)** by Al Danial - The classic code counting tool
 - **[Chart.js](https://www.chartjs.org/)** - Beautiful, responsive charts
-- **[kelseyhightower/nocode](https://github.com/kelseyhightower/nocode)** - Test repository
 
 ## 🔗 Links
 
-- **Documentation**: [docs/](docs/)
 - **Issues**: [GitHub Issues](https://github.com/slepp/cloc-history-analyzer/issues)
 - **Releases**: [GitHub Releases](https://github.com/slepp/cloc-history-analyzer/releases)
 

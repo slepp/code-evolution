@@ -35,7 +35,7 @@ function ensureTestData() {
 
   if (!existsSync(dataPath) || !existsSync(htmlPath)) {
     console.log('Generating test data...');
-    execSync(`node ${join(PROJECT_ROOT, 'analyze.mjs')} https://github.com/kelseyhightower/nocode ${TEST_OUTPUT}`, {
+    execSync(`node ${join(PROJECT_ROOT, 'analyze.mjs')} https://github.com/octocat/Hello-World ${TEST_OUTPUT}`, {
       cwd: PROJECT_ROOT,
       stdio: 'pipe'
     });
