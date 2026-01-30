@@ -1560,7 +1560,7 @@ function generateHTML(data, repoUrl) {
     const FILTER_Q_MAX = 8;            // Resonance at max intensity
     const RAMP_TIME_MS = 50;           // Smooth parameter transitions
     const MAX_VOICES = 16;             // Limit oscillators (matches color palette)
-    const VOLUME_MIN = 0.8;            // Minimum volume scaling (80%)
+    const VOLUME_MIN = 0.2;            // Minimum volume scaling (20%)
     const VOLUME_MAX = 1.0;            // Maximum volume scaling (100%)
     const REVERB_DECAY = 1.5;          // Reverb decay time in seconds
     const REVERB_PREDELAY = 0.02;      // Reverb predelay in seconds
@@ -1810,25 +1810,18 @@ function generateHTML(data, repoUrl) {
     }
     
     function initAudio() {
-      if (audioCtx) {
-        console.log('initAudio: Already initialized');
-        return;
-      }
+      if (audioCtx) return;
 
-      console.log('initAudio: Creating AudioContext...');
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      console.log('initAudio: AudioContext created, state=' + audioCtx.state + ', sampleRate=' + audioCtx.sampleRate);
 
       // Create master gain (final output)
       masterGain = audioCtx.createGain();
       masterGain.gain.value = 0;
       masterGain.connect(audioCtx.destination);
-      console.log('initAudio: Master gain created and connected to destination');
 
       // Create reverb convolver
       reverb = audioCtx.createConvolver();
       reverb.buffer = createReverbImpulse(audioCtx.sampleRate, REVERB_DECAY, REVERB_PREDELAY);
-      console.log('initAudio: Reverb created with buffer length=' + reverb.buffer.length);
       
       // Create wet/dry mix gains
       reverbWetGain = audioCtx.createGain();
@@ -1842,7 +1835,6 @@ function generateHTML(data, repoUrl) {
       
       // Connect dry gain directly to master
       reverbDryGain.connect(masterGain);
-      console.log('initAudio: Reverb wet/dry paths connected');
 
       // Create shared lowpass filter - connects to both wet and dry paths
       filter = audioCtx.createBiquadFilter();
@@ -1851,12 +1843,10 @@ function generateHTML(data, repoUrl) {
       filter.Q.value = FILTER_Q_BASE;
       filter.connect(reverb);      // Wet path through reverb
       filter.connect(reverbDryGain); // Dry path bypasses reverb
-      console.log('initAudio: Filter created at ' + FILTER_CUTOFF + 'Hz, Q=' + FILTER_Q_BASE);
 
       // Create voice pool (oscillator + individual gain per voice)
       // Assign frequencies from major scale: C, D, E, F, G, A, B, C, D, E...
       // Each language gets a stable voice assignment
-      console.log('initAudio: Creating ' + MAX_VOICES + ' voices...');
       for (let i = 0; i < MAX_VOICES; i++) {
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
@@ -1879,12 +1869,7 @@ function generateHTML(data, repoUrl) {
         osc.start();
 
         voices.push({ osc, gain, lang: null });  // Track which language owns this voice
-        
-        if (i === 0 || i === MAX_VOICES - 1) {
-          console.log('initAudio: Voice ' + i + ' frequency=' + frequency.toFixed(2) + 'Hz, detune=' + osc.detune.value.toFixed(2) + ' cents');
-        }
       }
-      console.log('initAudio: All ' + voices.length + ' voices created and started');
       
       // Assign each language to a voice based on its index in ALL_LANGUAGES
       // This gives each language a stable pitch throughout the animation
@@ -1894,8 +1879,6 @@ function generateHTML(data, repoUrl) {
           voices[i].lang = lang;
         }
       });
-      console.log('initAudio: Language-to-voice mapping complete. Mapped ' + Object.keys(languageVoiceMap).length + ' languages');
-      console.log('initAudio: INITIALIZATION COMPLETE');
     }
 
     function updateAudio() {
@@ -1914,8 +1897,6 @@ function generateHTML(data, repoUrl) {
         totalLines += lines;
       });
 
-      console.log('updateAudio:', { currentIndex, totalLines, soundEnabled, voicesCount: voices.length });
-
       // Update each voice based on its assigned language's proportion at this commit
       ALL_LANGUAGES.forEach((lang, i) => {
         if (i >= MAX_VOICES) return;
@@ -1925,14 +1906,12 @@ function generateHTML(data, repoUrl) {
         // Proportion is per-commit: this language's lines / total lines at this commit
         const proportion = totalLines > 0 ? lines / totalLines : 0;
         
-        console.log('Voice ' + i + ' (' + lang + '): lines=' + lines + ', proportion=' + proportion.toFixed(3));
-        
         // Voice frequency never changes - only gain modulates
         // This creates the THX-like effect where each tone independently fades in/out
         voice.gain.gain.linearRampToValueAtTime(proportion, rampEnd);
       });
 
-      // Master gain with 20% volume variation based on total lines
+      // Master gain with volume variation based on total lines
       // Find min/max lines across all commits for scaling
       let minLines = Infinity, maxLines = 0;
       DATA.forEach(c => {
@@ -1941,7 +1920,7 @@ function generateHTML(data, repoUrl) {
         maxLines = Math.max(maxLines, lines);
       });
       
-      // Scale current total lines to 0.8-1.0 range (20% variation)
+      // Scale current total lines to VOLUME_MIN-VOLUME_MAX range
       const normalizedIntensity = maxLines > minLines 
         ? (totalLines - minLines) / (maxLines - minLines)
         : 1;
@@ -1951,7 +1930,6 @@ function generateHTML(data, repoUrl) {
       
       // Master gain controls audibility
       const targetGain = soundEnabled ? intensityScale * volume * 0.5 : 0;
-      console.log('Master gain: intensityScale=' + intensityScale.toFixed(3) + ', volume=' + volume.toFixed(2) + ', targetGain=' + targetGain.toFixed(3) + ', soundEnabled=' + soundEnabled);
       masterGain.gain.linearRampToValueAtTime(targetGain, rampEnd);
       
       // Filter Q still varies with intensity for brightness
@@ -1959,34 +1937,20 @@ function generateHTML(data, repoUrl) {
     }
 
     function resumeAudioContext() {
-      if (!audioCtx) {
-        console.log('resumeAudioContext: No audioCtx yet');
-        return;
-      }
-      console.log('resumeAudioContext: AudioContext state=' + audioCtx.state);
+      if (!audioCtx) return;
       if (audioCtx.state === 'suspended') {
-        console.log('resumeAudioContext: Resuming suspended context...');
-        audioCtx.resume().then(() => {
-          console.log('resumeAudioContext: Resumed! New state=' + audioCtx.state);
-        });
+        audioCtx.resume();
       }
     }
 
     function toggleSound() {
-      if (!AUDIO_SUPPORTED) {
-        console.log('toggleSound: Audio not supported');
-        return;
-      }
-
-      console.log('toggleSound: Called, current soundEnabled=' + soundEnabled);
+      if (!AUDIO_SUPPORTED) return;
 
       if (!audioCtx) {
-        console.log('toggleSound: Initializing audio for first time...');
         initAudio();
       }
 
       soundEnabled = !soundEnabled;
-      console.log('toggleSound: New soundEnabled=' + soundEnabled);
 
       // Update UI
       elements.soundToggle.classList.toggle('active', soundEnabled);
