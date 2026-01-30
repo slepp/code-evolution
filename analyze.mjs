@@ -21,7 +21,7 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'fs
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const SCHEMA_VERSION = '2.1';  // Added pre-computed audio data
+const SCHEMA_VERSION = '2.2';  // Added pre-computed totals per commit
 
 // =============================================================================
 // OpenTelemetry Tracing (optional - only active when env vars are set)
@@ -612,12 +612,25 @@ function analyzeCommits(repoDir, commits, existingResults = []) {
       // Track all languages we've seen
       Object.keys(counterData.languages).forEach(lang => allLanguages.add(lang));
       
+      // Pre-compute totals for visualization performance
+      let totalLines = 0;
+      let totalFiles = 0;
+      let totalBytes = 0;
+      for (const lang in counterData.languages) {
+        totalLines += counterData.languages[lang].code || 0;
+        totalFiles += counterData.languages[lang].files || 0;
+        totalBytes += counterData.languages[lang].bytes || 0;
+      }
+
       results.push({
         commit: commit.hash,
         date: commit.date,
         message: commit.message,
         analysis: counterData.analysis,
-        languages: counterData.languages
+        languages: counterData.languages,
+        totalLines,
+        totalFiles,
+        totalBytes
       });
       
       if (!JSON_PROGRESS) {
@@ -696,87 +709,98 @@ function analyzeCommits(repoDir, commits, existingResults = []) {
 }
 
 /**
- * Compute pre-baked audio data for all commits.
+ * Compute pre-baked audio data for all commits and all metrics.
  * This moves audio state calculation from browser runtime to build time.
- * 
- * For each commit, we compute:
- * - voices: array of { gain, detune } for each language (up to MAX_VOICES)
- * - masterIntensity: normalized total lines (0-1 range)
- * 
+ *
+ * For each commit and metric (lines, files, bytes), we compute:
+ * - voices: object of { gain, detune } for each language (up to MAX_VOICES)
+ * - masterIntensity: normalized total (0-1 range)
+ *
  * @param {Array} results - Analysis results array
  * @param {Array} allLanguages - Sorted language list (determines voice assignment)
  * @returns {Array} Audio data array, one entry per commit
  */
 function computeAudioData(results, allLanguages) {
   if (results.length === 0) return [];
-  
-  // Find global min/max lines for intensity normalization
-  let minLines = Infinity;
-  let maxLines = 0;
-  
-  for (const commit of results) {
-    let totalLines = 0;
-    for (const lang in commit.languages) {
-      totalLines += commit.languages[lang].code || 0;
+
+  const metrics = ['lines', 'files', 'bytes'];
+  const metricKeys = { lines: 'code', files: 'files', bytes: 'bytes' };
+
+  // Find global min/max for each metric (for intensity normalization)
+  const minMax = {};
+  for (const metric of metrics) {
+    let min = Infinity, max = 0;
+    for (const commit of results) {
+      let total = 0;
+      for (const lang in commit.languages) {
+        total += commit.languages[lang][metricKeys[metric]] || 0;
+      }
+      min = Math.min(min, total);
+      max = Math.max(max, total);
     }
-    minLines = Math.min(minLines, totalLines);
-    maxLines = Math.max(maxLines, totalLines);
+    minMax[metric] = { min, max };
   }
-  
+
   const audioData = [];
-  
+
   for (let i = 0; i < results.length; i++) {
     const commit = results[i];
     const prevCommit = i > 0 ? results[i - 1] : null;
-    
-    // Calculate total lines for this commit
-    let totalLines = 0;
-    for (const lang in commit.languages) {
-      totalLines += commit.languages[lang].code || 0;
-    }
-    
-    // Compute normalized intensity (0-1)
-    const masterIntensity = maxLines > minLines
-      ? (totalLines - minLines) / (maxLines - minLines)
-      : 1;
-    
-    // Compute voice data for each language (up to MAX_VOICES)
-    const voices = {};
-    
-    for (let v = 0; v < Math.min(allLanguages.length, AUDIO_MAX_VOICES); v++) {
-      const lang = allLanguages[v];
-      const lines = commit.languages[lang]?.code || 0;
-      const prevLines = prevCommit?.languages[lang]?.code || 0;
-      
-      // Gain is proportion of total lines (0-1)
-      const gain = totalLines > 0 ? lines / totalLines : 0;
-      
-      // Detune based on growth trend (+/- AUDIO_DETUNE_MAX cents)
-      // Growing = positive detune (pitch up), shrinking = negative (pitch down)
-      let detune = 0;
-      if (prevCommit && prevLines > 0) {
-        // Calculate growth rate: (current - prev) / prev
-        // Clamp to reasonable range to avoid extreme values
-        const growthRate = (lines - prevLines) / prevLines;
-        // Map growth rate to detune: ±100% growth → ±AUDIO_DETUNE_MAX cents
-        detune = Math.max(-AUDIO_DETUNE_MAX, Math.min(AUDIO_DETUNE_MAX, growthRate * AUDIO_DETUNE_MAX));
-      } else if (lines > 0 && prevLines === 0) {
-        // New language appeared - slight pitch up
-        detune = AUDIO_DETUNE_MAX * 0.5;
+
+    const frameData = {};
+
+    for (const metric of metrics) {
+      const key = metricKeys[metric];
+      const { min, max } = minMax[metric];
+
+      // Calculate total for this commit
+      let total = 0;
+      for (const lang in commit.languages) {
+        total += commit.languages[lang][key] || 0;
       }
-      
-      voices[lang] = {
-        gain: Math.round(gain * 10000) / 10000,  // Round to 4 decimal places
-        detune: Math.round(detune * 100) / 100   // Round to 2 decimal places
+
+      // Compute normalized intensity (0-1)
+      const masterIntensity = max > min
+        ? (total - min) / (max - min)
+        : 1;
+
+      // Compute voice data for each language (up to MAX_VOICES)
+      const voices = {};
+
+      for (let v = 0; v < Math.min(allLanguages.length, AUDIO_MAX_VOICES); v++) {
+        const lang = allLanguages[v];
+        const value = commit.languages[lang]?.[key] || 0;
+        const prevValue = prevCommit?.languages[lang]?.[key] || 0;
+
+        // Gain is proportion of total (0-1)
+        const gain = total > 0 ? value / total : 0;
+
+        // Detune based on growth trend (+/- AUDIO_DETUNE_MAX cents)
+        // Growing = positive detune (pitch up), shrinking = negative (pitch down)
+        let detune = 0;
+        if (prevCommit && prevValue > 0) {
+          const growthRate = (value - prevValue) / prevValue;
+          detune = Math.max(-AUDIO_DETUNE_MAX, Math.min(AUDIO_DETUNE_MAX, growthRate * AUDIO_DETUNE_MAX));
+        } else if (value > 0 && prevValue === 0) {
+          // New language appeared - slight pitch up
+          detune = AUDIO_DETUNE_MAX * 0.5;
+        }
+
+        voices[lang] = {
+          gain: Math.round(gain * 10000) / 10000,
+          detune: Math.round(detune * 100) / 100
+        };
+      }
+
+      frameData[metric] = {
+        masterIntensity: Math.round(masterIntensity * 10000) / 10000,
+        voices
       };
     }
-    
-    audioData.push({
-      masterIntensity: Math.round(masterIntensity * 10000) / 10000,
-      voices
-    });
+
+    audioData.push(frameData);
   }
-  
+
   return audioData;
 }
 
@@ -1309,6 +1333,34 @@ function generateHTML(data, repoUrl) {
       color: var(--text-primary);
     }
 
+    .metric-control {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      margin-left: 0.5rem;
+      padding-left: 0.5rem;
+      border-left: 1px solid var(--border-default);
+    }
+
+    .metric-control label {
+      font-family: var(--font-mono);
+      font-size: 0.65rem;
+      color: var(--text-tertiary);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .metric-control select {
+      font-family: var(--font-mono);
+      padding: 0.35rem 0.5rem;
+      border: 1px solid var(--border-default);
+      border-radius: 4px;
+      font-size: 0.7rem;
+      cursor: pointer;
+      background: var(--bg-tertiary);
+      color: var(--text-primary);
+    }
+
     .sound-control {
       display: flex;
       align-items: center;
@@ -1555,6 +1607,14 @@ function generateHTML(data, repoUrl) {
               <option value="4">4x</option>
             </select>
           </div>
+          <div class="metric-control">
+            <label>Metric</label>
+            <select id="metric">
+              <option value="lines" selected>Lines</option>
+              <option value="files">Files</option>
+              <option value="bytes">Bytes</option>
+            </select>
+          </div>
           <div class="sound-control" id="sound-control">
             <button id="sound-toggle" class="secondary sound-btn" title="Toggle sound">
               <svg class="sound-icon sound-off" viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
@@ -1702,11 +1762,16 @@ function generateHTML(data, repoUrl) {
       soundVolume: document.getElementById('sound-volume'),
       soundIconOff: document.querySelector('.sound-off'),
       soundIconOn: document.querySelector('.sound-on'),
+      metric: document.getElementById('metric'),
       totalLines: document.getElementById('total-lines'),
       totalDelta: document.getElementById('total-delta'),
       totalFiles: document.getElementById('total-files'),
-      filesDelta: document.getElementById('files-delta')
+      filesDelta: document.getElementById('files-delta'),
+      summaryStats: document.getElementById('summary-stats')
     };
+
+    // Current metric: 'lines', 'files', or 'bytes'
+    let currentMetric = 'lines';
     
     function escapeHtml(text) {
       const div = document.createElement('div');
@@ -1717,7 +1782,65 @@ function generateHTML(data, repoUrl) {
     function formatNumber(num) {
       return num.toLocaleString();
     }
-    
+
+    function formatBytes(bytes) {
+      if (bytes === 0) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+    }
+
+    function formatMetricValue(value, metric) {
+      if (metric === 'bytes') return formatBytes(value);
+      return formatNumber(value);
+    }
+
+    function formatMetricDelta(current, previous, metric) {
+      if (previous === undefined || previous === null) return '';
+      const delta = current - previous;
+      if (delta === 0) {
+        return '<span class="delta delta-neutral">±0</span>';
+      } else if (delta > 0) {
+        const formatted = metric === 'bytes' ? formatBytes(delta) : formatNumber(delta);
+        return \`<span class="delta delta-positive">+\${formatted}</span>\`;
+      } else {
+        const formatted = metric === 'bytes' ? formatBytes(Math.abs(delta)) : formatNumber(delta);
+        return \`<span class="delta delta-negative">\${metric === 'bytes' ? '-' + formatted : formatted}</span>\`;
+      }
+    }
+
+    // Get metric value from language stats
+    function getMetricValue(stats, metric) {
+      if (!stats) return 0;
+      switch (metric) {
+        case 'lines': return stats.code || 0;
+        case 'files': return stats.files || 0;
+        case 'bytes': return stats.bytes || 0;
+        default: return stats.code || 0;
+      }
+    }
+
+    // Get total metric from frame
+    function getFrameTotal(frame, metric) {
+      switch (metric) {
+        case 'lines': return frame.totalLines || 0;
+        case 'files': return frame.totalFiles || 0;
+        case 'bytes': return frame.totalBytes || 0;
+        default: return frame.totalLines || 0;
+      }
+    }
+
+    // Get metric label for display
+    function getMetricLabel(metric) {
+      switch (metric) {
+        case 'lines': return 'Lines';
+        case 'files': return 'Files';
+        case 'bytes': return 'Bytes';
+        default: return 'Lines';
+      }
+    }
+
     function formatDelta(current, previous) {
       if (previous === undefined || previous === null) {
         return '';
@@ -1731,7 +1854,73 @@ function generateHTML(data, repoUrl) {
         return \`<span class="delta delta-negative">\${formatNumber(delta)}</span>\`;
       }
     }
-    
+
+    // Table DOM cache for efficient updates (DOM diffing)
+    const tableRowCache = [];
+
+    function initTable() {
+      // Create table rows once, store references to updateable cells
+      elements.tableBody.innerHTML = '';
+
+      for (let i = 0; i < ALL_LANGUAGES.length; i++) {
+        const lang = ALL_LANGUAGES[i];
+        const tr = document.createElement('tr');
+
+        // Language name cell (static after init)
+        const tdLang = document.createElement('td');
+        tdLang.className = 'language-name';
+        tdLang.style.color = LANGUAGE_COLORS[lang];
+        tdLang.textContent = lang;
+        tr.appendChild(tdLang);
+
+        // Percentage cell
+        const tdPercent = document.createElement('td');
+        tdPercent.className = 'percentage-text';
+        tr.appendChild(tdPercent);
+
+        // Lines count cell (with delta and secondary info)
+        const tdLines = document.createElement('td');
+        tdLines.className = 'lines-count';
+        const linesMain = document.createElement('span');
+        const linesDelta = document.createElement('span');
+        const linesSecondary = document.createElement('span');
+        linesSecondary.className = 'lines-secondary';
+        tdLines.appendChild(linesMain);
+        tdLines.appendChild(document.createTextNode(' '));
+        tdLines.appendChild(linesDelta);
+        tdLines.appendChild(document.createTextNode(' '));
+        tdLines.appendChild(linesSecondary);
+        tr.appendChild(tdLines);
+
+        // Files count cell (with delta)
+        const tdFiles = document.createElement('td');
+        tdFiles.className = 'files-count';
+        const filesMain = document.createElement('span');
+        const filesDelta = document.createElement('span');
+        tdFiles.appendChild(filesMain);
+        tdFiles.appendChild(document.createTextNode(' '));
+        tdFiles.appendChild(filesDelta);
+        tr.appendChild(tdFiles);
+
+        elements.tableBody.appendChild(tr);
+
+        // Cache references for fast updates
+        tableRowCache.push({
+          row: tr,
+          lang,
+          percent: tdPercent,
+          linesMain,
+          linesDelta,
+          linesSecondary,
+          filesMain,
+          filesDelta,
+          lastMetric: null,  // Track which metric was last rendered
+          // Track previous values to skip unchanged updates
+          prevValues: { metricValue: -1, files: -1, percentage: -1, blank: -1, comment: -1 }
+        });
+      }
+    }
+
     function initChart() {
       const ctx = document.getElementById('chart-canvas').getContext('2d');
 
@@ -1852,9 +2041,24 @@ function generateHTML(data, repoUrl) {
       });
     }
     
+    let lastChartMetric = null;
+
     function updateChart() {
       if (!chart) return;
-      
+
+      // Check if metric changed - need full rebuild
+      if (lastChartMetric !== currentMetric) {
+        lastChartIndex = -1;
+        chart.data.labels = [];
+        chart.data.datasets.forEach(dataset => {
+          dataset.data = [];
+        });
+        lastChartMetric = currentMetric;
+      }
+
+      // Skip if already at current index (no work to do)
+      if (currentIndex === lastChartIndex) return;
+
       // Reset if going backwards (e.g., user clicked reset or moved timeline back)
       if (currentIndex < lastChartIndex) {
         lastChartIndex = -1;
@@ -1863,20 +2067,18 @@ function generateHTML(data, repoUrl) {
           dataset.data = [];
         });
       }
-      
+
       // Optimized O(n) incremental update - only add new data points
-      if (currentIndex > lastChartIndex) {
-        for (let i = lastChartIndex + 1; i <= currentIndex; i++) {
-          chart.data.labels.push(i + 1);
-          
-          chart.data.datasets.forEach((dataset, idx) => {
-            const lang = ALL_LANGUAGES[idx];
-            const stats = DATA[i].languages[lang];
-            dataset.data.push(stats ? stats.code : 0);
-          });
-        }
+      for (let i = lastChartIndex + 1; i <= currentIndex; i++) {
+        chart.data.labels.push(i + 1);
+
+        chart.data.datasets.forEach((dataset, idx) => {
+          const lang = ALL_LANGUAGES[idx];
+          const stats = DATA[i].languages[lang];
+          dataset.data.push(getMetricValue(stats, currentMetric));
+        });
       }
-      
+
       lastChartIndex = currentIndex;
       chart.update('none'); // No animation for smoother playback
     }
@@ -1983,76 +2185,41 @@ function generateHTML(data, repoUrl) {
 
       const now = audioCtx.currentTime;
       const rampEnd = now + (RAMP_TIME_MS / 1000);
-      const commit = DATA[currentIndex];
       const audioFrame = AUDIO_DATA[currentIndex];
 
-      // Use pre-computed audio data if available (schema 2.1+)
-      if (audioFrame && audioFrame.voices) {
-        // Apply pre-computed voice gains and detunes
-        ALL_LANGUAGES.forEach((lang, i) => {
-          if (i >= MAX_VOICES) return;
-          
-          const voice = voices[i];
-          const voiceData = audioFrame.voices[lang];
-          
-          if (voiceData) {
-            // Apply gain (proportion of total lines)
-            voice.gain.gain.linearRampToValueAtTime(voiceData.gain, rampEnd);
-            // Apply detune: base chorusing + dynamic pitch variation
-            voice.osc.detune.linearRampToValueAtTime(voice.baseDetune + voiceData.detune, rampEnd);
-          } else {
-            voice.gain.gain.linearRampToValueAtTime(0, rampEnd);
-            voice.osc.detune.linearRampToValueAtTime(voice.baseDetune, rampEnd);
-          }
-        });
+      // Require pre-computed audio data (schema 2.2+ with per-metric data)
+      if (!audioFrame) return;
 
-        // Use pre-computed master intensity
-        const intensityScale = VOLUME_MIN + (audioFrame.masterIntensity * (VOLUME_MAX - VOLUME_MIN));
-        const volume = elements.soundVolume.value / 100;
-        const targetGain = soundEnabled ? intensityScale * volume * 0.5 : 0;
-        masterGain.gain.linearRampToValueAtTime(targetGain, rampEnd);
-        
-        // Filter Q varies with intensity for brightness
-        filter.Q.linearRampToValueAtTime(FILTER_Q_BASE + audioFrame.masterIntensity * FILTER_Q_MAX, rampEnd);
-      } else {
-        // Fallback: runtime calculation for older data files without audioData
-        let totalLines = 0;
-        const languageData = {};
-        ALL_LANGUAGES.forEach(lang => {
-          const lines = commit.languages[lang]?.code || 0;
-          languageData[lang] = lines;
-          totalLines += lines;
-        });
+      // Get audio data for current metric
+      const metricData = audioFrame[currentMetric];
+      if (!metricData || !metricData.voices) return;
 
-        ALL_LANGUAGES.forEach((lang, i) => {
-          if (i >= MAX_VOICES) return;
-          
-          const voice = voices[i];
-          const lines = languageData[lang];
-          const proportion = totalLines > 0 ? lines / totalLines : 0;
-          voice.gain.gain.linearRampToValueAtTime(proportion, rampEnd);
-          // Reset detune to base (no dynamic variation in fallback mode)
+      // Apply pre-computed voice gains and detunes for current metric
+      ALL_LANGUAGES.forEach((lang, i) => {
+        if (i >= MAX_VOICES) return;
+
+        const voice = voices[i];
+        const voiceData = metricData.voices[lang];
+
+        if (voiceData) {
+          // Apply gain (proportion of total for current metric)
+          voice.gain.gain.linearRampToValueAtTime(voiceData.gain, rampEnd);
+          // Apply detune: base chorusing + dynamic pitch variation
+          voice.osc.detune.linearRampToValueAtTime(voice.baseDetune + voiceData.detune, rampEnd);
+        } else {
+          voice.gain.gain.linearRampToValueAtTime(0, rampEnd);
           voice.osc.detune.linearRampToValueAtTime(voice.baseDetune, rampEnd);
-        });
+        }
+      });
 
-        // Calculate intensity from scratch
-        let minLines = Infinity, maxLines = 0;
-        DATA.forEach(c => {
-          const lines = Object.values(c.languages).reduce((sum, lang) => sum + (lang.code || 0), 0);
-          minLines = Math.min(minLines, lines);
-          maxLines = Math.max(maxLines, lines);
-        });
-        
-        const normalizedIntensity = maxLines > minLines 
-          ? (totalLines - minLines) / (maxLines - minLines)
-          : 1;
-        const intensityScale = VOLUME_MIN + (normalizedIntensity * (VOLUME_MAX - VOLUME_MIN));
-        
-        const volume = elements.soundVolume.value / 100;
-        const targetGain = soundEnabled ? intensityScale * volume * 0.5 : 0;
-        masterGain.gain.linearRampToValueAtTime(targetGain, rampEnd);
-        filter.Q.linearRampToValueAtTime(FILTER_Q_BASE + normalizedIntensity * FILTER_Q_MAX, rampEnd);
-      }
+      // Use pre-computed master intensity for current metric
+      const intensityScale = VOLUME_MIN + (metricData.masterIntensity * (VOLUME_MAX - VOLUME_MIN));
+      const volume = elements.soundVolume.value / 100;
+      const targetGain = soundEnabled ? intensityScale * volume * 0.5 : 0;
+      masterGain.gain.linearRampToValueAtTime(targetGain, rampEnd);
+
+      // Filter Q varies with intensity for brightness
+      filter.Q.linearRampToValueAtTime(FILTER_Q_BASE + metricData.masterIntensity * FILTER_Q_MAX, rampEnd);
     }
 
     function fadeOutAudio() {
@@ -2111,18 +2278,17 @@ function generateHTML(data, repoUrl) {
 
     function updateDisplay() {
       if (DATA.length === 0) {
-        elements.tableBody.innerHTML = '<tr><td colspan="4" class="empty-state">No data available</td></tr>';
         return;
       }
-      
+
       const frame = DATA[currentIndex];
       const prevFrame = currentIndex > 0 ? DATA[currentIndex - 1] : null;
-      
+
       // Update commit info
       elements.date.textContent = frame.date;
       elements.hash.textContent = frame.commit.substring(0, 8);
       elements.number.textContent = \`Commit \${currentIndex + 1} of \${DATA.length}\`;
-      
+
       // Update timeline
       const progress = ((currentIndex + 1) / DATA.length) * 100;
       elements.timeline.style.width = progress + '%';
@@ -2130,97 +2296,96 @@ function generateHTML(data, repoUrl) {
       // Update audio sonification
       updateAudio();
 
-      // Calculate total lines of code and files
-      let totalLines = 0;
-      let totalFiles = 0;
-      for (const lang in frame.languages) {
-        totalLines += frame.languages[lang].code;
-        totalFiles += frame.languages[lang].files;
-      }
-      
-      // Calculate previous totals
-      let prevTotalLines = 0;
-      let prevTotalFiles = 0;
-      if (prevFrame) {
-        for (const lang in prevFrame.languages) {
-          prevTotalLines += prevFrame.languages[lang].code;
-          prevTotalFiles += prevFrame.languages[lang].files;
-        }
-      }
-      
-      // Update summary stats
-      elements.totalLines.textContent = formatNumber(totalLines);
+      // Get totals based on current metric
+      const total = getFrameTotal(frame, currentMetric);
+      const prevTotal = prevFrame ? getFrameTotal(prevFrame, currentMetric) : 0;
+      const totalFiles = frame.totalFiles || 0;
+      const prevTotalFiles = prevFrame ? (prevFrame.totalFiles || 0) : 0;
+
+      // Update summary stats (primary stat changes with metric)
+      elements.totalLines.textContent = formatMetricValue(total, currentMetric);
       elements.totalFiles.textContent = formatNumber(totalFiles);
-      
+
       if (prevFrame) {
-        elements.totalDelta.innerHTML = formatDelta(totalLines, prevTotalLines);
+        elements.totalDelta.innerHTML = formatMetricDelta(total, prevTotal, currentMetric);
         elements.filesDelta.innerHTML = formatDelta(totalFiles, prevTotalFiles);
       } else {
         elements.totalDelta.innerHTML = '';
         elements.filesDelta.innerHTML = '';
       }
-      
-      // Build rows for all languages (stable sort - already sorted by final commit)
-      const rows = [];
-      for (const lang of ALL_LANGUAGES) {
-        const stats = frame.languages[lang];
-        const prevStats = prevFrame ? prevFrame.languages[lang] : null;
-        
-        const lines = stats ? stats.code : 0;
+
+      // Update table via DOM diffing - only update changed cells
+      for (const cached of tableRowCache) {
+        const stats = frame.languages[cached.lang];
+        const prevStats = prevFrame ? prevFrame.languages[cached.lang] : null;
+
+        // Get metric value for this language
+        const metricValue = getMetricValue(stats, currentMetric);
+        const prevMetricValue = getMetricValue(prevStats, currentMetric);
         const files = stats ? stats.files : 0;
         const blank = stats ? stats.blank : 0;
         const comment = stats ? stats.comment : 0;
-        const prevLines = prevStats ? prevStats.code : 0;
         const prevFiles = prevStats ? prevStats.files : 0;
-        
-        const percentage = totalLines > 0 ? (lines / totalLines) * 100 : 0;
-        
-        rows.push({
-          lang,
-          lines,
-          files,
-          blank,
-          comment,
-          prevLines,
-          prevFiles,
-          percentage,
-          active: lines > 0
-        });
+        const percentage = total > 0 ? (metricValue / total) * 100 : 0;
+        const active = metricValue > 0;
+
+        const prev = cached.prevValues;
+
+        // Update row class only if active state changed
+        const wasActive = prev.metricValue > 0;
+        if (active !== wasActive) {
+          cached.row.className = active ? '' : 'row-inactive';
+        }
+
+        // Update percentage if changed (check with tolerance for floating point)
+        if (Math.abs(percentage - prev.percentage) > 0.01) {
+          cached.percent.textContent = percentage.toFixed(1) + '%';
+          prev.percentage = percentage;
+        }
+
+        // Update primary metric value if changed
+        if (metricValue !== prev.metricValue || cached.lastMetric !== currentMetric) {
+          cached.linesMain.textContent = formatMetricValue(metricValue, currentMetric);
+          prev.metricValue = metricValue;
+          cached.lastMetric = currentMetric;
+        }
+
+        // Update metric delta
+        if (prevFrame) {
+          cached.linesDelta.innerHTML = formatMetricDelta(metricValue, prevMetricValue, currentMetric);
+        } else {
+          cached.linesDelta.innerHTML = '';
+        }
+
+        // Update secondary info (blank/comment) - only show for lines metric
+        if (currentMetric === 'lines') {
+          if (blank !== prev.blank || comment !== prev.comment) {
+            if (active && (blank > 0 || comment > 0)) {
+              cached.linesSecondary.textContent = formatNumber(blank) + 'b ' + formatNumber(comment) + 'c';
+            } else {
+              cached.linesSecondary.textContent = '';
+            }
+            prev.blank = blank;
+            prev.comment = comment;
+          }
+        } else {
+          cached.linesSecondary.textContent = '';
+        }
+
+        // Update files if changed
+        if (files !== prev.files) {
+          cached.filesMain.textContent = formatNumber(files);
+          prev.files = files;
+        }
+
+        // Update files delta
+        if (prevFrame) {
+          cached.filesDelta.innerHTML = formatDelta(files, prevFiles);
+        } else {
+          cached.filesDelta.innerHTML = '';
+        }
       }
-      
-      // Languages are already in stable sort order (from ALL_LANGUAGES)
-      // No need to sort - they maintain their final-commit-based order
-      
-      // Render table
-      let html = '';
-      for (const row of rows) {
-        const linesDelta = prevFrame ? formatDelta(row.lines, row.prevLines) : '';
-        const filesDelta = prevFrame ? formatDelta(row.files, row.prevFiles) : '';
-        
-        const rowClass = row.active ? '' : 'row-inactive';
-        const secondaryInfo = row.active && (row.blank > 0 || row.comment > 0) 
-          ? \`<span class="lines-secondary">\${formatNumber(row.blank)}b \${formatNumber(row.comment)}c</span>\`
-          : '';
-        
-        html += \`
-          <tr class="\${rowClass}">
-            <td class="language-name" style="color: \${LANGUAGE_COLORS[row.lang]}">\${escapeHtml(row.lang)}</td>
-            <td class="percentage-text">\${row.percentage.toFixed(1)}%</td>
-            <td class="lines-count">
-              \${formatNumber(row.lines)} \${linesDelta}
-              \${secondaryInfo}
-            </td>
-            <td class="files-count">\${formatNumber(row.files)} \${filesDelta}</td>
-          </tr>
-        \`;
-      }
-      
-      if (html === '') {
-        html = '<tr><td colspan="4" class="empty-state">No code detected</td></tr>';
-      }
-      
-      elements.tableBody.innerHTML = html;
-      
+
       // Update chart
       updateChart();
     }
@@ -2302,6 +2467,32 @@ function generateHTML(data, repoUrl) {
         pause();
         play();
       }
+    });
+
+    // Metric selector
+    elements.metric.addEventListener('change', (e) => {
+      currentMetric = e.target.value;
+
+      // Update summary stats label
+      const labelEl = elements.summaryStats.querySelector('.stat-label');
+      if (labelEl) {
+        labelEl.textContent = 'Total ' + getMetricLabel(currentMetric);
+      }
+
+      // Update chart Y-axis label
+      if (chart) {
+        const yAxisLabels = { lines: 'LINES OF CODE', files: 'NUMBER OF FILES', bytes: 'SIZE IN BYTES' };
+        chart.options.scales.y.title.text = yAxisLabels[currentMetric] || 'LINES OF CODE';
+      }
+
+      // Force full table refresh by resetting cached values
+      tableRowCache.forEach(cached => {
+        cached.prevValues.metricValue = -1;
+        cached.prevValues.percentage = -1;
+      });
+
+      // Update display immediately
+      updateDisplay();
     });
 
     // Sound controls
@@ -2392,6 +2583,7 @@ function generateHTML(data, repoUrl) {
     });
 
     // Initialize
+    initTable();
     initChart();
     updateDisplay();
   </script>
