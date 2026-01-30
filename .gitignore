@@ -2,6 +2,10 @@
 output/
 test-output/
 metrics/
+cloc-history/
+.playwright-cli/
+test/playwright-output/
+tests/playwright-output/
 
 # Node modules (if any future dependencies)
 node_modules/
