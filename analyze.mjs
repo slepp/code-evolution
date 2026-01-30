@@ -1394,13 +1394,17 @@ function generateHTML(data, repoUrl) {
 
     // Audio sonification
     const AUDIO_SUPPORTED = !!(window.AudioContext || window.webkitAudioContext);
-    const FUNDAMENTAL_FREQ = 110;      // A2 - bass foundation
+    // Major scale starting from C2 (65.41 Hz)
+    // C, D, E, F, G, A, B, C, D, E, F, G, A, B, C, D...
+    const C2 = 65.41;
+    const MAJOR_SCALE_SEMITONES = [0, 2, 4, 5, 7, 9, 11]; // Major scale intervals
     const FILTER_CUTOFF = 2500;        // Hz - saw brightness cap
     const FILTER_Q_BASE = 1;           // Resonance minimum
     const FILTER_Q_MAX = 8;            // Resonance at max intensity
     const RAMP_TIME_MS = 50;           // Smooth parameter transitions
     const MAX_VOICES = 16;             // Limit oscillators (matches color palette)
-    const MAX_EXPECTED_LINES = 1000000; // Normalize intensity against
+    const VOLUME_MIN = 0.8;            // Minimum volume scaling (80%)
+    const VOLUME_MAX = 1.0;            // Maximum volume scaling (100%)
     const REVERB_DECAY = 1.5;          // Reverb decay time in seconds
     const REVERB_PREDELAY = 0.02;      // Reverb predelay in seconds
     const REVERB_WET = 0.15;           // Reverb wet mix (0-1)
@@ -1683,13 +1687,21 @@ function generateHTML(data, repoUrl) {
       filter.connect(reverbDryGain); // Dry path bypasses reverb
 
       // Create voice pool (oscillator + individual gain per voice)
+      // Assign frequencies from major scale: C, D, E, F, G, A, B, C, D, E...
       for (let i = 0; i < MAX_VOICES; i++) {
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
 
         osc.type = 'sine';  // Sine waves for smoother harmonic sound
-        osc.frequency.value = FUNDAMENTAL_FREQ * (i + 1);
-        // Detune each harmonic by 0.3 to 1 cent for subtle chorusing
+        
+        // Calculate frequency from major scale
+        const octave = Math.floor(i / 7);
+        const scaleStep = i % 7;
+        const semitones = MAJOR_SCALE_SEMITONES[scaleStep] + (octave * 12);
+        const frequency = C2 * Math.pow(2, semitones / 12);
+        
+        osc.frequency.value = frequency;
+        // Detune each note by 0.3 to 1 cent for subtle chorusing
         osc.detune.value = 0.3 + (Math.random() * 0.7);
         gain.gain.value = 0;
 
@@ -1708,39 +1720,54 @@ function generateHTML(data, repoUrl) {
       const rampEnd = now + (RAMP_TIME_MS / 1000);
       const commit = DATA[currentIndex];
 
-      // Sort languages by code lines (descending) to assign harmonic ranks
+      // Sort languages by code lines (descending) to assign scale positions
       const sorted = ALL_LANGUAGES
         .map(lang => ({ lang, lines: commit.languages[lang]?.code || 0 }))
         .sort((a, b) => b.lines - a.lines);
 
       const totalLines = sorted.reduce((sum, l) => sum + l.lines, 0);
 
-      // Update each voice based on rank
+      // Update each voice based on its rank in the major scale
       sorted.forEach((item, rank) => {
         if (rank >= MAX_VOICES) return;
 
         const voice = voices[rank];
+        // Proportion is per-commit: this language's lines / total lines at this commit
         const proportion = totalLines > 0 ? item.lines / totalLines : 0;
-        const freq = FUNDAMENTAL_FREQ * (rank + 1);
-
-        voice.osc.frequency.linearRampToValueAtTime(freq, rampEnd);
-        voice.gain.gain.linearRampToValueAtTime(proportion * 0.8, rampEnd);
+        
+        // Each voice already has its frequency set from the major scale during init
+        // Just update the gain based on this commit's proportions
+        voice.gain.gain.linearRampToValueAtTime(proportion, rampEnd);
       });
 
-      // Silence unused voices
+      // Silence unused voices (languages not present)
       for (let i = sorted.length; i < MAX_VOICES; i++) {
         voices[i].gain.gain.linearRampToValueAtTime(0, rampEnd);
       }
 
-      // Update intensity (master gain + filter Q)
-      const intensity = Math.min(1, totalLines / MAX_EXPECTED_LINES);
+      // Master gain with 20% volume variation based on total lines
+      // Find min/max lines across all commits for scaling
+      let minLines = Infinity, maxLines = 0;
+      DATA.forEach(c => {
+        const lines = Object.values(c.languages).reduce((sum, lang) => sum + (lang.code || 0), 0);
+        minLines = Math.min(minLines, lines);
+        maxLines = Math.max(maxLines, lines);
+      });
+      
+      // Scale current total lines to 0.8-1.0 range (20% variation)
+      const normalizedIntensity = maxLines > minLines 
+        ? (totalLines - minLines) / (maxLines - minLines)
+        : 1;
+      const intensityScale = VOLUME_MIN + (normalizedIntensity * (VOLUME_MAX - VOLUME_MIN));
+      
       const volume = elements.soundVolume.value / 100;
       
-      // Master gain controls audibility: 0 when disabled, scaled by volume when enabled
-      // Audio plays when sound is enabled, regardless of play/pause state
-      const targetGain = soundEnabled ? intensity * volume * 0.7 : 0;
+      // Master gain controls audibility
+      const targetGain = soundEnabled ? intensityScale * volume * 0.5 : 0;
       masterGain.gain.linearRampToValueAtTime(targetGain, rampEnd);
-      filter.Q.linearRampToValueAtTime(FILTER_Q_BASE + intensity * FILTER_Q_MAX, rampEnd);
+      
+      // Filter Q still varies with intensity for brightness
+      filter.Q.linearRampToValueAtTime(FILTER_Q_BASE + normalizedIntensity * FILTER_Q_MAX, rampEnd);
     }
 
     function resumeAudioContext() {
