@@ -712,9 +712,11 @@ function analyzeCommits(repoDir, commits, existingResults = []) {
  * Compute pre-baked audio data for all commits and all metrics.
  * This moves audio state calculation from browser runtime to build time.
  *
- * For each commit and metric (lines, files, bytes), we compute:
- * - voices: object of { gain, detune } for each language (up to MAX_VOICES)
- * - masterIntensity: normalized total (0-1 range)
+ * Optimized sparse format for each metric:
+ * [masterIntensity, [langIndex, gain, detune], [langIndex, gain, detune], ...]
+ * - Only non-zero gain voices are included (sparse)
+ * - Array-based format reduces JSON overhead
+ * - Gains rounded to 2 decimals, detune to 1 decimal
  *
  * @param {Array} results - Analysis results array
  * @param {Array} allLanguages - Sorted language list (determines voice assignment)
@@ -742,6 +744,7 @@ function computeAudioData(results, allLanguages) {
   }
 
   const audioData = [];
+  const maxVoices = Math.min(allLanguages.length, AUDIO_MAX_VOICES);
 
   for (let i = 0; i < results.length; i++) {
     const commit = results[i];
@@ -759,15 +762,15 @@ function computeAudioData(results, allLanguages) {
         total += commit.languages[lang][key] || 0;
       }
 
-      // Compute normalized intensity (0-1)
+      // Compute normalized intensity (0-1), rounded to 2 decimals
       const masterIntensity = max > min
-        ? (total - min) / (max - min)
+        ? Math.round(((total - min) / (max - min)) * 100) / 100
         : 1;
 
-      // Compute voice data for each language (up to MAX_VOICES)
-      const voices = {};
+      // Compute voice data - sparse array format [langIndex, gain, detune]
+      const activeVoices = [];
 
-      for (let v = 0; v < Math.min(allLanguages.length, AUDIO_MAX_VOICES); v++) {
+      for (let v = 0; v < maxVoices; v++) {
         const lang = allLanguages[v];
         const value = commit.languages[lang]?.[key] || 0;
         const prevValue = prevCommit?.languages[lang]?.[key] || 0;
@@ -775,27 +778,24 @@ function computeAudioData(results, allLanguages) {
         // Gain is proportion of total (0-1)
         const gain = total > 0 ? value / total : 0;
 
+        // Skip zero-gain voices (sparse optimization)
+        if (gain === 0) continue;
+
         // Detune based on growth trend (+/- AUDIO_DETUNE_MAX cents)
-        // Growing = positive detune (pitch up), shrinking = negative (pitch down)
         let detune = 0;
         if (prevCommit && prevValue > 0) {
           const growthRate = (value - prevValue) / prevValue;
           detune = Math.max(-AUDIO_DETUNE_MAX, Math.min(AUDIO_DETUNE_MAX, growthRate * AUDIO_DETUNE_MAX));
         } else if (value > 0 && prevValue === 0) {
-          // New language appeared - slight pitch up
           detune = AUDIO_DETUNE_MAX * 0.5;
         }
 
-        voices[lang] = {
-          gain: Math.round(gain * 10000) / 10000,
-          detune: Math.round(detune * 100) / 100
-        };
+        // Store as [langIndex, gain (2 decimals), detune (1 decimal)]
+        activeVoices.push([v, Math.round(gain * 100) / 100, Math.round(detune * 10) / 10]);
       }
 
-      frameData[metric] = {
-        masterIntensity: Math.round(masterIntensity * 10000) / 10000,
-        voices
-      };
+      // Format: [masterIntensity, ...activeVoices]
+      frameData[metric] = [masterIntensity, ...activeVoices];
     }
 
     audioData.push(frameData);
@@ -2327,58 +2327,56 @@ function generateHTML(data, repoUrl) {
       const rampEnd = now + (RAMP_TIME_MS / 1000);
       const audioFrame = AUDIO_DATA[currentIndex];
 
-      // Require pre-computed audio data (schema 2.2+ with per-metric data)
+      // Require pre-computed audio data (schema 2.2+)
       if (!audioFrame) return;
 
       // Get audio data for current metric
+      // Optimized sparse format: [masterIntensity, [langIndex, gain, detune], ...]
       const metricData = audioFrame[currentMetric];
-      if (!metricData || !metricData.voices) return;
+      if (!metricData || !Array.isArray(metricData)) return;
 
-      // Apply pre-computed voice gains and detunes for current metric
-      ALL_LANGUAGES.forEach((lang, i) => {
-        if (i >= MAX_VOICES) return;
+      const masterIntensity = metricData[0];
 
+      // First, silence all voices (sparse format only includes non-zero)
+      for (let i = 0; i < MAX_VOICES && i < voices.length; i++) {
         const voice = voices[i];
-        const voiceData = metricData.voices[lang];
+        voice.gain.gain.linearRampToValueAtTime(0, rampEnd);
+        voice.osc.detune.linearRampToValueAtTime(voice.baseDetune, rampEnd);
+        const targetPan = voice.basePan * audioSettings.stereoWidth;
+        voice.panner.pan.linearRampToValueAtTime(targetPan, rampEnd);
+      }
 
-        if (voiceData) {
-          // Apply gain with perceptual power curve
-          // Power < 1.0 boosts quiet languages, making them more audible
-          const rawGain = voiceData.gain;
-          const perceivedGain = Math.pow(rawGain, audioSettings.gainCurvePower);
-          voice.gain.gain.linearRampToValueAtTime(perceivedGain, rampEnd);
-          
-          // Apply detune: base chorusing + dynamic pitch variation
-          voice.osc.detune.linearRampToValueAtTime(voice.baseDetune + voiceData.detune, rampEnd);
-          
-          // Apply stereo width: 0 = center, 1 = full spread
-          const targetPan = voice.basePan * audioSettings.stereoWidth;
-          voice.panner.pan.linearRampToValueAtTime(targetPan, rampEnd);
-        } else {
-          voice.gain.gain.linearRampToValueAtTime(0, rampEnd);
-          voice.osc.detune.linearRampToValueAtTime(voice.baseDetune, rampEnd);
-          // Keep pan position even when silent (for smooth transitions)
-          const targetPan = voice.basePan * audioSettings.stereoWidth;
-          voice.panner.pan.linearRampToValueAtTime(targetPan, rampEnd);
-        }
-      });
+      // Apply gains only for active voices (sparse data)
+      for (let j = 1; j < metricData.length; j++) {
+        const [langIndex, gain, detune] = metricData[j];
+        if (langIndex >= MAX_VOICES || langIndex >= voices.length) continue;
+
+        const voice = voices[langIndex];
+
+        // Apply gain with perceptual power curve
+        const perceivedGain = Math.pow(gain, audioSettings.gainCurvePower);
+        voice.gain.gain.linearRampToValueAtTime(perceivedGain, rampEnd);
+
+        // Apply detune: base chorusing + dynamic pitch variation
+        voice.osc.detune.linearRampToValueAtTime(voice.baseDetune + detune, rampEnd);
+
+        // Apply stereo width
+        const targetPan = voice.basePan * audioSettings.stereoWidth;
+        voice.panner.pan.linearRampToValueAtTime(targetPan, rampEnd);
+      }
 
       // Apply intensity curve transformation
-      let adjustedIntensity = metricData.masterIntensity;
+      let adjustedIntensity = masterIntensity;
       switch (audioSettings.intensityCurve) {
         case 'log':
-          // Logarithmic: boosts early commits, compresses growth
-          // log(1 + x) / log(2) maps 0->0, 1->1 with gentle curve
-          adjustedIntensity = Math.log(1 + metricData.masterIntensity) / Math.log(2);
+          adjustedIntensity = Math.log(1 + masterIntensity) / Math.log(2);
           break;
         case 'exp':
-          // Exponential: quiet early, dramatic growth feeling
-          adjustedIntensity = metricData.masterIntensity * metricData.masterIntensity;
+          adjustedIntensity = masterIntensity * masterIntensity;
           break;
         case 'linear':
         default:
-          // Linear: use as-is
-          adjustedIntensity = metricData.masterIntensity;
+          adjustedIntensity = masterIntensity;
           break;
       }
 

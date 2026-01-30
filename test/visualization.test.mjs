@@ -68,7 +68,7 @@ describe('Visualization Data Tests', () => {
     console.log(`✓ All ${data.results.length} commits have pre-computed totals`);
   });
 
-  test('should have per-metric audio data', () => {
+  test('should have per-metric audio data (sparse format)', () => {
     const metrics = ['lines', 'files', 'bytes'];
 
     for (let i = 0; i < data.audioData.length; i++) {
@@ -76,13 +76,22 @@ describe('Visualization Data Tests', () => {
 
       for (const metric of metrics) {
         assert.ok(metric in frame, `Frame ${i} should have ${metric} audio data`);
-        assert.ok('masterIntensity' in frame[metric], `${metric} should have masterIntensity`);
-        assert.ok('voices' in frame[metric], `${metric} should have voices`);
-        assert.ok(frame[metric].masterIntensity >= 0 && frame[metric].masterIntensity <= 1,
+        // Sparse format: [masterIntensity, [langIndex, gain, detune], ...]
+        assert.ok(Array.isArray(frame[metric]), `${metric} should be array (sparse format)`);
+        assert.ok(frame[metric].length >= 1, `${metric} should have at least masterIntensity`);
+        const masterIntensity = frame[metric][0];
+        assert.ok(masterIntensity >= 0 && masterIntensity <= 1,
           `${metric} masterIntensity should be 0-1`);
+
+        // Validate voice entries
+        for (let j = 1; j < frame[metric].length; j++) {
+          const voice = frame[metric][j];
+          assert.ok(Array.isArray(voice) && voice.length === 3,
+            `Voice should be [langIndex, gain, detune]`);
+        }
       }
     }
-    console.log(`✓ All ${data.audioData.length} frames have per-metric audio data`);
+    console.log(`✓ All ${data.audioData.length} frames have per-metric audio data (sparse format)`);
   });
 
   test('should have bytes data for each language (scc counter)', () => {

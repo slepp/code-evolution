@@ -145,13 +145,13 @@ describe('CLOC History Analyzer - Audio Data', () => {
           const frame = data.audioData[0];
           const metrics = ['lines', 'files', 'bytes'];
 
-          // Each frame should have per-metric audio data
+          // Each frame should have per-metric audio data in sparse array format
+          // Format: [masterIntensity, [langIndex, gain, detune], ...]
           for (const metric of metrics) {
             assert.ok(metric in frame, `Should have ${metric} audio data`);
-            assert.ok('masterIntensity' in frame[metric], `${metric} should have masterIntensity`);
-            assert.ok('voices' in frame[metric], `${metric} should have voices`);
-            assert.strictEqual(typeof frame[metric].masterIntensity, 'number', `${metric} masterIntensity should be a number`);
-            assert.strictEqual(typeof frame[metric].voices, 'object', `${metric} voices should be an object`);
+            assert.ok(Array.isArray(frame[metric]), `${metric} should be array (sparse format)`);
+            assert.ok(frame[metric].length >= 1, `${metric} should have at least masterIntensity`);
+            assert.strictEqual(typeof frame[metric][0], 'number', `${metric} masterIntensity should be a number`);
           }
         }
       }
@@ -168,12 +168,13 @@ describe('CLOC History Analyzer - Audio Data', () => {
         const frame = data.audioData[0];
         const result = data.results[0];
 
-        // Check lines metric voice gains sum to ~1.0
-        if (result.totalLines > 0 && frame.lines) {
-          const sum = Object.values(frame.lines.voices).reduce((a, b) => a + b.gain, 0);
+        // Check lines metric voice gains sum to ~1.0 (sparse format)
+        // Format: [masterIntensity, [langIndex, gain, detune], ...]
+        if (result.totalLines > 0 && frame.lines && frame.lines.length > 1) {
+          const sum = frame.lines.slice(1).reduce((a, v) => a + v[1], 0);
 
           // Should sum to ~1.0 (allowing for floating point errors)
-          assert.ok(Math.abs(sum - 1.0) < 0.01, `Voice gains should sum to 1.0, got ${sum}`);
+          assert.ok(Math.abs(sum - 1.0) < 0.02, `Voice gains should sum to 1.0, got ${sum}`);
         }
       }
     }
@@ -214,7 +215,7 @@ describe('CLOC History Analyzer - HTML Generation', () => {
       
       assert.ok(html.includes('AudioContext'), 'Should have AudioContext code');
       assert.ok(html.includes('createOscillator'), 'Should create oscillators');
-      assert.ok(html.includes('const C3 = ') || html.includes('const C4 = '), 'Should use C3 or C4 frequency');
+      assert.ok(html.includes('130.81') || html.includes('261.63'), 'Should use C3 (130.81 Hz) or C4 (261.63 Hz) frequency');
     }
   });
 

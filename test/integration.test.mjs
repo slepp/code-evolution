@@ -208,26 +208,39 @@ describe('Integration Tests - Output Validation', () => {
           const result = data.results[i];
 
           // Each frame should have audio data for all metrics
+          // Optimized sparse format: [masterIntensity, [langIndex, gain, detune], ...]
           for (const metric of metrics) {
             assert.ok(metric in frame, `Frame should have ${metric} audio data`);
             const metricData = frame[metric];
 
-            assert.ok('masterIntensity' in metricData, `${metric} should have masterIntensity`);
-            assert.ok('voices' in metricData, `${metric} should have voices`);
-            assert.ok(typeof metricData.masterIntensity === 'number', `${metric} masterIntensity should be number`);
-            assert.ok(metricData.masterIntensity >= 0 && metricData.masterIntensity <= 1,
+            assert.ok(Array.isArray(metricData), `${metric} should be array (sparse format)`);
+            assert.ok(metricData.length >= 1, `${metric} should have at least masterIntensity`);
+
+            const masterIntensity = metricData[0];
+            assert.ok(typeof masterIntensity === 'number', `${metric} masterIntensity should be number`);
+            assert.ok(masterIntensity >= 0 && masterIntensity <= 1,
               `${metric} masterIntensity should be 0-1`);
+
+            // Validate voice entries (sparse format: [langIndex, gain, detune])
+            for (let j = 1; j < metricData.length; j++) {
+              const voice = metricData[j];
+              assert.ok(Array.isArray(voice) && voice.length === 3,
+                `Voice should be [langIndex, gain, detune]`);
+              assert.ok(typeof voice[0] === 'number', 'langIndex should be number');
+              assert.ok(typeof voice[1] === 'number', 'gain should be number');
+              assert.ok(typeof voice[2] === 'number', 'detune should be number');
+            }
           }
 
           // Validate voice gains sum to ~1.0 for lines metric (when there are lines)
-          if (result.totalLines > 0) {
-            const gainSum = Object.values(frame.lines.voices).reduce((sum, v) => sum + v.gain, 0);
-            assert.ok(Math.abs(gainSum - 1.0) < 0.01,
-              `Voice gains should sum to 1.0 at frame ${i}, got ${gainSum}`);
+          if (result.totalLines > 0 && frame.lines.length > 1) {
+            const gainSum = frame.lines.slice(1).reduce((sum, v) => sum + v[1], 0);
+            assert.ok(Math.abs(gainSum - 1.0) < 0.02,
+              `Voice gains should sum to ~1.0 at frame ${i}, got ${gainSum}`);
           }
         }
 
-        console.log(`✓ Audio data validated for ${data.audioData.length} frames (all metrics)`);
+        console.log(`✓ Audio data validated for ${data.audioData.length} frames (sparse format)`);
       }
 
       // Validate pre-computed totals in results (schema 2.2+)
@@ -267,7 +280,7 @@ describe('Integration Tests - Output Validation', () => {
       
       // Audio checks
       assert.ok(html.includes('AudioContext'), 'Should have audio code');
-      assert.ok(html.includes('const C3 = 130.81'), 'Should use C3 frequency');
+      assert.ok(html.includes('130.81'), 'Should use C3 frequency (130.81 Hz)');
       assert.ok(html.includes('createOscillator'), 'Should create oscillators');
       
       // Control checks
