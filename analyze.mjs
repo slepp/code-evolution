@@ -1477,19 +1477,21 @@ Analyzes code evolution over time by running cloc on every commit.
 Supports incremental updates - only analyzes new commits on subsequent runs.
 
 Usage:
-  node analyze.mjs <git-repo-url> [output-dir] [--force-full] [--json-progress]
+  node analyze.mjs <git-repo-url> [output-dir] [--force-full] [--json-progress] [--local-repo <path>]
 
 Arguments:
-  git-repo-url      URL of the git repository to analyze
+  git-repo-url      URL of the git repository to analyze (used for metadata)
   output-dir        Output directory (default: ./output)
   --force-full      Force full analysis, ignore existing data
   --json-progress   Output progress as JSONL to stderr for machine parsing
+  --local-repo      Path to already cloned repository (skips cloning)
 
 Example:
   node analyze.mjs https://github.com/user/repo
   node analyze.mjs https://github.com/user/repo ./my-output
   node analyze.mjs https://github.com/user/repo ./output --force-full
   node analyze.mjs https://github.com/user/repo ./output --json-progress
+  node analyze.mjs https://github.com/user/repo ./output --local-repo /tmp/cloned-repo
 
 Output:
   - output/data.json          Raw cloc data for all commits (v2.0 format)
@@ -1506,12 +1508,15 @@ Incremental Updates:
   const repoUrl = args[0];
   let outputDir = './output';
   let forceFull = false;
+  let localRepoPath = null;
   
   for (let i = 1; i < args.length; i++) {
     if (args[i] === '--force-full') {
       forceFull = true;
     } else if (args[i] === '--json-progress') {
       JSON_PROGRESS = true;
+    } else if (args[i] === '--local-repo' && args[i + 1]) {
+      localRepoPath = args[++i];
     } else if (!args[i].startsWith('--')) {
       outputDir = args[i];
     }
@@ -1549,13 +1554,30 @@ Incremental Updates:
     }
   }
   
-  // Create temp directory for repo
-  const tempDir = mkdtempSync(join(tmpdir(), 'cloc-analysis-'));
-  const repoDir = join(tempDir, 'repo');
+  // Create temp directory for repo (or use local repo)
+  let tempDir = null;
+  let repoDir;
+  let shouldCleanup = false;
+  
+  if (localRepoPath) {
+    // Use existing local repository
+    repoDir = localRepoPath;
+    if (!JSON_PROGRESS) {
+      console.log(`📂 Using local repository: ${localRepoPath}`);
+    }
+    emitProgress('validating', 5, 'Using local repository', { local_repo: localRepoPath });
+  } else {
+    // Clone repository to temp directory
+    tempDir = mkdtempSync(join(tmpdir(), 'cloc-analysis-'));
+    repoDir = join(tempDir, 'repo');
+    shouldCleanup = true;
+  }
   
   try {
-    // Clone repository
-    cloneRepo(repoUrl, repoDir);
+    // Clone repository (only if not using local repo)
+    if (!localRepoPath) {
+      cloneRepo(repoUrl, repoDir);
+    }
     
     // Get commits (incremental or full)
     let commits;
@@ -1633,11 +1655,13 @@ Incremental Updates:
     });
     process.exit(1);
   } finally {
-    // Cleanup
-    if (!JSON_PROGRESS) {
-      console.log('\n🧹 Cleaning up temporary files...');
+    // Cleanup (only if we created a temp directory)
+    if (shouldCleanup && tempDir) {
+      if (!JSON_PROGRESS) {
+        console.log('\n🧹 Cleaning up temporary files...');
+      }
+      rmSync(tempDir, { recursive: true, force: true });
     }
-    rmSync(tempDir, { recursive: true, force: true });
   }
 }
 
