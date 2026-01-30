@@ -1401,11 +1401,17 @@ function generateHTML(data, repoUrl) {
     const RAMP_TIME_MS = 50;           // Smooth parameter transitions
     const MAX_VOICES = 16;             // Limit oscillators (matches color palette)
     const MAX_EXPECTED_LINES = 1000000; // Normalize intensity against
+    const REVERB_DECAY = 1.5;          // Reverb decay time in seconds
+    const REVERB_PREDELAY = 0.02;      // Reverb predelay in seconds
+    const REVERB_WET = 0.15;           // Reverb wet mix (0-1)
 
     let audioCtx = null;
     let soundEnabled = false;
     let masterGain = null;
     let filter = null;
+    let reverb = null;
+    let reverbWetGain = null;
+    let reverbDryGain = null;
     let voices = [];
 
     // Data visualization color palette - vivid, distinct colors
@@ -1618,22 +1624,63 @@ function generateHTML(data, repoUrl) {
     }
 
     // Audio sonification functions
+    
+    // Generate impulse response for convolution reverb
+    function createReverbImpulse(sampleRate, decayTime, preDelay) {
+      const preDelaySamples = Math.floor(preDelay * sampleRate);
+      const decaySamples = Math.floor(decayTime * sampleRate);
+      const totalLength = preDelaySamples + decaySamples;
+      const impulse = audioCtx.createBuffer(2, totalLength, sampleRate);
+      
+      for (let channel = 0; channel < 2; channel++) {
+        const channelData = impulse.getChannelData(channel);
+        for (let i = 0; i < totalLength; i++) {
+          if (i < preDelaySamples) {
+            channelData[i] = 0;
+          } else {
+            const decayIndex = i - preDelaySamples;
+            const decay = Math.exp(-3 * decayIndex / decaySamples);
+            channelData[i] = (Math.random() * 2 - 1) * decay;
+          }
+        }
+      }
+      return impulse;
+    }
+    
     function initAudio() {
       if (audioCtx) return;
 
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
-      // Create master gain
+      // Create master gain (final output)
       masterGain = audioCtx.createGain();
       masterGain.gain.value = 0;
       masterGain.connect(audioCtx.destination);
 
-      // Create shared lowpass filter
+      // Create reverb convolver
+      reverb = audioCtx.createConvolver();
+      reverb.buffer = createReverbImpulse(audioCtx.sampleRate, REVERB_DECAY, REVERB_PREDELAY);
+      
+      // Create wet/dry mix gains
+      reverbWetGain = audioCtx.createGain();
+      reverbWetGain.gain.value = REVERB_WET;
+      reverbDryGain = audioCtx.createGain();
+      reverbDryGain.gain.value = 1 - REVERB_WET;
+      
+      // Connect reverb to wet gain to master
+      reverb.connect(reverbWetGain);
+      reverbWetGain.connect(masterGain);
+      
+      // Connect dry gain directly to master
+      reverbDryGain.connect(masterGain);
+
+      // Create shared lowpass filter - connects to both wet and dry paths
       filter = audioCtx.createBiquadFilter();
       filter.type = 'lowpass';
       filter.frequency.value = FILTER_CUTOFF;
       filter.Q.value = FILTER_Q_BASE;
-      filter.connect(masterGain);
+      filter.connect(reverb);      // Wet path through reverb
+      filter.connect(reverbDryGain); // Dry path bypasses reverb
 
       // Create voice pool (oscillator + individual gain per voice)
       for (let i = 0; i < MAX_VOICES; i++) {
@@ -1653,7 +1700,7 @@ function generateHTML(data, repoUrl) {
     }
 
     function updateAudio() {
-      if (!soundEnabled || !audioCtx) return;
+      if (!audioCtx) return;
 
       const now = audioCtx.currentTime;
       const rampEnd = now + (RAMP_TIME_MS / 1000);
@@ -1686,22 +1733,18 @@ function generateHTML(data, repoUrl) {
       // Update intensity (master gain + filter Q)
       const intensity = Math.min(1, totalLines / MAX_EXPECTED_LINES);
       const volume = elements.soundVolume.value / 100;
-      masterGain.gain.linearRampToValueAtTime(intensity * volume * 0.7, rampEnd);
+      
+      // Master gain controls audibility: 0 when disabled or not playing, scaled by volume when enabled
+      const targetGain = (soundEnabled && isPlaying) ? intensity * volume * 0.7 : 0;
+      masterGain.gain.linearRampToValueAtTime(targetGain, rampEnd);
       filter.Q.linearRampToValueAtTime(FILTER_Q_BASE + intensity * FILTER_Q_MAX, rampEnd);
     }
 
-    function startAudio() {
+    function resumeAudioContext() {
       if (!audioCtx) return;
       if (audioCtx.state === 'suspended') {
         audioCtx.resume();
       }
-      updateAudio();
-    }
-
-    function stopAudio() {
-      if (!audioCtx || !masterGain) return;
-      const now = audioCtx.currentTime;
-      masterGain.gain.linearRampToValueAtTime(0, now + 0.05);
     }
 
     function toggleSound() {
@@ -1718,11 +1761,13 @@ function generateHTML(data, repoUrl) {
       elements.soundIconOff.style.display = soundEnabled ? 'none' : 'block';
       elements.soundIconOn.style.display = soundEnabled ? 'block' : 'none';
 
-      if (soundEnabled && isPlaying) {
-        startAudio();
-      } else {
-        stopAudio();
+      // Resume audio context if needed (browser autoplay policy)
+      if (soundEnabled) {
+        resumeAudioContext();
       }
+      
+      // Update audio immediately to reflect new enabled state
+      updateAudio();
     }
 
     function updateDisplay() {
@@ -1847,8 +1892,10 @@ function generateHTML(data, repoUrl) {
       elements.playPause.textContent = 'Pause';
       elements.playPause.classList.remove('primary');
 
-      // Start audio if enabled
-      if (soundEnabled) startAudio();
+      // Resume audio context if sound is enabled
+      if (soundEnabled) {
+        resumeAudioContext();
+      }
 
       const effectiveDelay = Math.max(MIN_FRAME_DELAY, Math.floor(baseFrameDelay / speedMultiplier));
       animationInterval = setInterval(() => {
@@ -1869,8 +1916,7 @@ function generateHTML(data, repoUrl) {
         clearInterval(animationInterval);
         animationInterval = null;
       }
-      // Stop audio
-      stopAudio();
+      // Audio continues running, oscillators stay alive
     }
     
     function next() {
