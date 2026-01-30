@@ -1687,8 +1687,10 @@ function generateHTML(data, repoUrl) {
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
 
-        osc.type = 'sawtooth';
+        osc.type = 'sine';  // Sine waves for smoother harmonic sound
         osc.frequency.value = FUNDAMENTAL_FREQ * (i + 1);
+        // Detune each harmonic by 0.3 to 1 cent for subtle chorusing
+        osc.detune.value = 0.3 + (Math.random() * 0.7);
         gain.gain.value = 0;
 
         osc.connect(gain);
@@ -1734,8 +1736,9 @@ function generateHTML(data, repoUrl) {
       const intensity = Math.min(1, totalLines / MAX_EXPECTED_LINES);
       const volume = elements.soundVolume.value / 100;
       
-      // Master gain controls audibility: 0 when disabled or not playing, scaled by volume when enabled
-      const targetGain = (soundEnabled && isPlaying) ? intensity * volume * 0.7 : 0;
+      // Master gain controls audibility: 0 when disabled, scaled by volume when enabled
+      // Audio plays when sound is enabled, regardless of play/pause state
+      const targetGain = soundEnabled ? intensity * volume * 0.7 : 0;
       masterGain.gain.linearRampToValueAtTime(targetGain, rampEnd);
       filter.Q.linearRampToValueAtTime(FILTER_Q_BASE + intensity * FILTER_Q_MAX, rampEnd);
     }
@@ -1966,9 +1969,9 @@ function generateHTML(data, repoUrl) {
     if (AUDIO_SUPPORTED) {
       elements.soundToggle.addEventListener('click', toggleSound);
       elements.soundVolume.addEventListener('input', () => {
-        if (soundEnabled && masterGain) {
-          const volume = elements.soundVolume.value / 100;
-          masterGain.gain.linearRampToValueAtTime(volume * 0.7, audioCtx.currentTime + 0.05);
+        // Update audio to reflect new volume
+        if (audioCtx) {
+          updateAudio();
         }
       });
     } else {
