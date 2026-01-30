@@ -231,6 +231,12 @@ async function shutdownTracing(success = true) {
 // Global flag for JSON progress output
 let JSON_PROGRESS = false;
 
+// Counter tool to use: 'scc' (default, ~80x faster) or 'cloc'
+let COUNTER_TOOL = 'scc';
+
+// Exclude directories for code counting (common build/dependency folders)
+const EXCLUDE_DIRS = ['node_modules', '.git', 'dist', 'build', 'target', 'pkg', '.venv', 'venv', '__pycache__', '.pytest_cache', '.mypy_cache', 'vendor'];
+
 /**
  * Emit a progress event as JSONL to stderr
  * @param {string} stage - Current stage (validating, cloning, analyzing, generating, complete)
@@ -375,10 +381,108 @@ function getCommitHistory(repoDir, branch = 'main', afterCommit = null) {
   }
 }
 
+/**
+ * Run scc (Succinct Code Counter) - ~80x faster than cloc
+ * @param {string} repoDir - Directory to analyze
+ * @returns {object} Analysis results with languages and metadata
+ */
+function runScc(repoDir) {
+  try {
+    const startTime = Date.now();
+    
+    // Build exclude args for scc
+    const excludeArgs = EXCLUDE_DIRS.map(d => `--exclude-dir "${d}"`).join(' ');
+    
+    // scc options:
+    // --format json: JSON output
+    // --no-cocomo: Skip COCOMO cost estimation (not needed)
+    // --count-as: Map common config files to their types
+    const result = exec(
+      `scc "${repoDir}" --format json --no-cocomo ${excludeArgs} --count-as "editorconfig:INI"`,
+      { silent: true, ignoreError: true }
+    );
+    
+    const elapsedSeconds = (Date.now() - startTime) / 1000;
+    
+    if (!result) {
+      return { 
+        languages: {},
+        analysis: {
+          elapsed_seconds: elapsedSeconds,
+          n_files: 0,
+          n_lines: 0,
+          files_per_second: 0,
+          lines_per_second: 0,
+          counter_tool: 'scc',
+          counter_version: 'unknown'
+        }
+      };
+    }
+    
+    const data = JSON.parse(result);
+    
+    // Calculate totals from scc output
+    let totalFiles = 0;
+    let totalLines = 0;
+    
+    // Extract language data from scc array format
+    const languages = {};
+    for (const entry of data) {
+      const langName = entry.Name;
+      
+      languages[langName] = {
+        files: entry.Count || 0,
+        blank: entry.Blank || 0,
+        comment: entry.Comment || 0,
+        code: entry.Code || 0,
+        // Extra fields only available from scc
+        complexity: entry.Complexity || 0,
+        bytes: entry.Bytes || 0,
+        lines: entry.Lines || 0
+      };
+      
+      totalFiles += entry.Count || 0;
+      totalLines += entry.Lines || 0;
+    }
+    
+    const analysis = {
+      elapsed_seconds: elapsedSeconds,
+      n_files: totalFiles,
+      n_lines: totalLines,
+      files_per_second: elapsedSeconds > 0 ? totalFiles / elapsedSeconds : 0,
+      lines_per_second: elapsedSeconds > 0 ? totalLines / elapsedSeconds : 0,
+      counter_tool: 'scc',
+      counter_version: '3.x' // scc doesn't include version in JSON output
+    };
+    
+    return { languages, analysis };
+  } catch (error) {
+    console.error(`    ⚠ Warning: scc failed - ${error.message}`);
+    return { 
+      languages: {},
+      analysis: {
+        elapsed_seconds: 0,
+        n_files: 0,
+        n_lines: 0,
+        files_per_second: 0,
+        lines_per_second: 0,
+        counter_tool: 'scc',
+        counter_version: 'unknown'
+      }
+    };
+  }
+}
+
+/**
+ * Run cloc (Count Lines of Code) - traditional tool, more thorough but slower
+ * @param {string} repoDir - Directory to analyze
+ * @returns {object} Analysis results with languages and metadata
+ */
 function runCloc(repoDir) {
   try {
+    const excludeDirs = EXCLUDE_DIRS.join(',');
     const result = exec(
-      `cloc "${repoDir}" --json --quiet --exclude-dir=node_modules,.git,dist,build,target,pkg,.venv,venv,__pycache__,.pytest_cache,.mypy_cache,vendor`,
+      `cloc "${repoDir}" --json --quiet --exclude-dir=${excludeDirs}`,
       { silent: true, ignoreError: true }
     );
     
@@ -390,7 +494,9 @@ function runCloc(repoDir) {
           n_files: 0,
           n_lines: 0,
           files_per_second: 0,
-          lines_per_second: 0
+          lines_per_second: 0,
+          counter_tool: 'cloc',
+          counter_version: 'unknown'
         }
       };
     }
@@ -405,7 +511,8 @@ function runCloc(repoDir) {
       n_lines: header.n_lines || 0,
       files_per_second: header.files_per_second || 0,
       lines_per_second: header.lines_per_second || 0,
-      cloc_version: header.cloc_version || 'unknown'
+      counter_tool: 'cloc',
+      counter_version: header.cloc_version || 'unknown'
     };
     
     // Extract language data (skip header and SUM entries)
@@ -432,9 +539,23 @@ function runCloc(repoDir) {
         n_lines: 0,
         files_per_second: 0,
         lines_per_second: 0,
-        cloc_version: 'unknown'
+        counter_tool: 'cloc',
+        counter_version: 'unknown'
       }
     };
+  }
+}
+
+/**
+ * Run the configured code counter tool (scc or cloc)
+ * @param {string} repoDir - Directory to analyze
+ * @returns {object} Analysis results with languages and metadata
+ */
+function runCounter(repoDir) {
+  if (COUNTER_TOOL === 'scc') {
+    return runScc(repoDir);
+  } else {
+    return runCloc(repoDir);
   }
 }
 
@@ -481,18 +602,18 @@ function analyzeCommits(repoDir, commits, existingResults = []) {
       // Checkout commit
       exec(`git -C "${repoDir}" checkout -q ${commit.hash}`, { silent: true });
       
-      // Run cloc
-      const clocData = runCloc(repoDir);
+      // Run counter (scc or cloc based on COUNTER_TOOL setting)
+      const counterData = runCounter(repoDir);
       
       // Track all languages we've seen
-      Object.keys(clocData.languages).forEach(lang => allLanguages.add(lang));
+      Object.keys(counterData.languages).forEach(lang => allLanguages.add(lang));
       
       results.push({
         commit: commit.hash,
         date: commit.date,
         message: commit.message,
-        analysis: clocData.analysis,
-        languages: clocData.languages
+        analysis: counterData.analysis,
+        languages: counterData.languages
       });
       
       if (!JSON_PROGRESS) {
@@ -606,7 +727,7 @@ function loadExistingData(outputDir) {
 /**
  * Create data structure with metadata
  */
-function createDataStructure(repoUrl, results, allLanguages, analysisTime, clocVersion) {
+function createDataStructure(repoUrl, results, allLanguages, analysisTime, counterInfo) {
   const lastCommit = results.length > 0 ? results[results.length - 1] : null;
   
   return {
@@ -616,7 +737,10 @@ function createDataStructure(repoUrl, results, allLanguages, analysisTime, clocV
       analyzed_at: new Date().toISOString(),
       total_commits: results.length,
       total_duration_seconds: analysisTime,
-      cloc_version: clocVersion || 'unknown',
+      counter_tool: counterInfo?.tool || COUNTER_TOOL,
+      counter_version: counterInfo?.version || 'unknown',
+      // Keep cloc_version for backward compatibility
+      cloc_version: counterInfo?.version || 'unknown',
       last_commit_hash: lastCommit ? lastCommit.commit : null,
       last_commit_date: lastCommit ? lastCommit.date : null
     },
@@ -2192,18 +2316,28 @@ async function main() {
 📊 CLOC History Analyzer v${SCHEMA_VERSION}
 ========================
 
-Analyzes code evolution over time by running cloc on every commit.
+Analyzes code evolution over time by counting lines of code on every commit.
 Supports incremental updates - only analyzes new commits on subsequent runs.
 
 Usage:
-  node analyze.mjs <git-repo-url> [output-dir] [--force-full] [--json-progress] [--local-repo <path>]
+  node analyze.mjs <git-repo-url> [output-dir] [options]
 
 Arguments:
   git-repo-url      URL of the git repository to analyze (used for metadata)
   output-dir        Output directory (default: ./output)
+
+Options:
   --force-full      Force full analysis, ignore existing data
   --json-progress   Output progress as JSONL to stderr for machine parsing
   --local-repo      Path to already cloned repository (skips cloning)
+  --counter <tool>  Code counter tool: 'scc' (default, ~80x faster) or 'cloc'
+
+Counter Tools:
+  scc   - Succinct Code Counter (Go, very fast, includes complexity metrics)
+  cloc  - Count Lines of Code (Perl, traditional, more language mappings)
+  
+  Both tools provide: files, code lines, blank lines, comment lines
+  scc additionally provides: complexity, bytes, total lines
 
 Environment Variables (for distributed tracing):
   OTEL_TRACING_ENABLED        Set to 'true' to enable OpenTelemetry tracing
@@ -2214,11 +2348,12 @@ Example:
   node analyze.mjs https://github.com/user/repo
   node analyze.mjs https://github.com/user/repo ./my-output
   node analyze.mjs https://github.com/user/repo ./output --force-full
+  node analyze.mjs https://github.com/user/repo ./output --counter cloc
   node analyze.mjs https://github.com/user/repo ./output --json-progress
   node analyze.mjs https://github.com/user/repo ./output --local-repo /tmp/cloned-repo
 
 Output:
-  - output/data.json          Raw cloc data for all commits (v2.0 format)
+  - output/data.json          Raw code count data for all commits (v2.0 format)
   - output/visualization.html Interactive HTML animation
 
 Incremental Updates:
@@ -2241,6 +2376,14 @@ Incremental Updates:
       JSON_PROGRESS = true;
     } else if (args[i] === '--local-repo' && args[i + 1]) {
       localRepoPath = args[++i];
+    } else if (args[i] === '--counter' && args[i + 1]) {
+      const tool = args[++i].toLowerCase();
+      if (tool === 'scc' || tool === 'cloc') {
+        COUNTER_TOOL = tool;
+      } else {
+        console.error(`Error: Invalid counter tool '${tool}'. Use 'scc' or 'cloc'.`);
+        process.exit(1);
+      }
     } else if (!args[i].startsWith('--')) {
       outputDir = args[i];
     }
@@ -2253,6 +2396,7 @@ Incremental Updates:
     rootSpan.setAttribute('analyzer.output_dir', outputDir);
     rootSpan.setAttribute('analyzer.force_full', forceFull);
     rootSpan.setAttribute('analyzer.local_repo', localRepoPath || 'none');
+    rootSpan.setAttribute('analyzer.counter_tool', COUNTER_TOOL);
   }
   
   let success = false;
@@ -2264,6 +2408,7 @@ Incremental Updates:
     console.log('========================\n');
     console.log(`Repository: ${repoUrl}`);
     console.log(`Output: ${outputDir}`);
+    console.log(`Counter: ${COUNTER_TOOL}${COUNTER_TOOL === 'scc' ? ' (fast)' : ''}`);
     if (forceFull) {
       console.log('Mode: Full analysis (--force-full)');
     }
@@ -2339,10 +2484,13 @@ Incremental Updates:
     const existingResults = existingData ? existingData.results : [];
     const analysisData = analyzeCommits(repoDir, commits, existingResults);
     
-    // Get cloc version from first analyzed commit
-    const clocVersion = analysisData.results.length > 0 
-      ? analysisData.results[0].analysis.cloc_version
-      : 'unknown';
+    // Get counter info from first analyzed commit
+    const counterInfo = analysisData.results.length > 0 
+      ? {
+          tool: analysisData.results[0].analysis.counter_tool || COUNTER_TOOL,
+          version: analysisData.results[0].analysis.counter_version || 'unknown'
+        }
+      : { tool: COUNTER_TOOL, version: 'unknown' };
     
     // Create data structure with metadata
     const data = createDataStructure(
@@ -2350,7 +2498,7 @@ Incremental Updates:
       analysisData.results,
       analysisData.allLanguages,
       analysisData.analysisTime,
-      clocVersion
+      counterInfo
     );
     
     // Save data
