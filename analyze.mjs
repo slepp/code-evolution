@@ -1798,11 +1798,35 @@ function generateHTML(data, repoUrl) {
 
     // Audio sonification
     const AUDIO_SUPPORTED = !!(window.AudioContext || window.webkitAudioContext);
-    // Major scale starting from C4 (261.63 Hz) - audible on all speakers
-    // Using C4 (middle C) instead of C2 for better audibility
-    // C, D, E, F, G, A, B, C, D, E, F, G, A, B, C, D...
-    const C3 = 130.81;  // C3 - one octave below middle C, pleasant and audible on laptops
-    const MAJOR_SCALE_SEMITONES = [0, 2, 4, 5, 7, 9, 11]; // Major scale intervals
+    
+    // Frequency mapping: Spread languages across multiple octaves for harmonic clarity
+    // Primary languages (top 3): Wide spacing across 2+ octaves
+    // Secondary languages (4-8): Fill harmonic gaps with pleasant intervals
+    // Tertiary languages (9-16): Complete the harmonic palette
+    //
+    // Design rationale:
+    // - Primary languages are often 70-90% of codebase (e.g., JavaScript in Express)
+    // - Placing them in same octave creates muddy, bass-heavy sound with no timbral change
+    // - Multi-octave spread gives each language its own "voice" in the harmonic spectrum
+    // - Musical intervals (3rds, 5ths, octaves) sound pleasant when overlapping
+    const VOICE_FREQUENCIES = [
+      130.81,  // C3  - 1st: Foundational bass (primary language)
+      329.63,  // E4  - 2nd: Bright, major third harmony (secondary language)
+      392.00,  // G4  - 3rd: High, perfect fifth above E4
+      261.63,  // C4  - 4th: Octave above primary
+      196.00,  // G3  - 5th: Perfect fifth above C3
+      440.00,  // A4  - 6th: Concert pitch, bright
+      293.66,  // D4  - 7th: Middle voice
+      246.94,  // B3  - 8th: Leading tone feel
+      174.61,  // F3  - 9th: Subdominant
+      220.00,  // A3  - 10th: Fills low-mid range
+      349.23,  // F4  - 11th: Upper-mid range
+      493.88,  // B4  - 12th: Highest voice
+      155.56,  // Eb3 - 13th: Minor color
+      311.13,  // Eb4 - 14th: Minor color octave
+      277.18,  // C#4 - 15th: Sharp edge
+      415.30   // G#4 - 16th: Sharp edge high
+    ];
     const FILTER_CUTOFF = 2500;        // Hz - saw brightness cap
     const FILTER_Q_BASE = 1;           // Resonance minimum
     const FILTER_Q_MAX = 8;            // Resonance at max intensity
@@ -2250,8 +2274,8 @@ function generateHTML(data, repoUrl) {
       filter.connect(reverbDryGain); // Dry path bypasses reverb
 
       // Create voice pool (oscillator + individual gain + stereo panner per voice)
-      // Assign frequencies from major scale: C, D, E, F, G, A, B, C, D, E...
-      // Each language gets a stable voice assignment and stereo position
+      // Each language gets assigned to a voice based on its rank in ALL_LANGUAGES
+      // Primary languages (most common) get widely-spaced frequencies for clarity
       for (let i = 0; i < MAX_VOICES; i++) {
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
@@ -2259,15 +2283,14 @@ function generateHTML(data, repoUrl) {
 
         osc.type = 'sine';  // Sine waves for smoother harmonic sound
         
-        // Calculate frequency from major scale
-        const octave = Math.floor(i / 7);
-        const scaleStep = i % 7;
-        const semitones = MAJOR_SCALE_SEMITONES[scaleStep] + (octave * 12);
-        const frequency = C3 * Math.pow(2, semitones / 12);
-        
+        // Use pre-defined frequency for this voice
+        const frequency = VOICE_FREQUENCIES[i] || 440.0;  // Fallback to A4
         osc.frequency.value = frequency;
-        // Base detune: slight chorusing (0.3 to 1 cent)
-        const baseDetune = 0.3 + (Math.random() * 0.7);
+        
+        // Base detune: add slight random offset to prevent phase interference
+        // This eliminates "thrumming" / beating effects from phase-aligned oscillators
+        // Range: ±3 cents (subtle, imperceptible pitch variation)
+        const baseDetune = (Math.random() - 0.5) * 6;
         osc.detune.value = baseDetune;
         gain.gain.value = 0;
 
