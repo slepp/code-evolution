@@ -1740,6 +1740,8 @@ function generateHTML(data, repoUrl) {
         totalLines += lines;
       });
 
+      console.log('updateAudio:', { currentIndex, totalLines, soundEnabled, voicesCount: voices.length });
+
       // Update each voice based on its assigned language's proportion at this commit
       ALL_LANGUAGES.forEach((lang, i) => {
         if (i >= MAX_VOICES) return;
@@ -1748,6 +1750,8 @@ function generateHTML(data, repoUrl) {
         const lines = languageData[lang];
         // Proportion is per-commit: this language's lines / total lines at this commit
         const proportion = totalLines > 0 ? lines / totalLines : 0;
+        
+        console.log('Voice ' + i + ' (' + lang + '): lines=' + lines + ', proportion=' + proportion.toFixed(3));
         
         // Voice frequency never changes - only gain modulates
         // This creates the THX-like effect where each tone independently fades in/out
@@ -1773,6 +1777,7 @@ function generateHTML(data, repoUrl) {
       
       // Master gain controls audibility
       const targetGain = soundEnabled ? intensityScale * volume * 0.5 : 0;
+      console.log('Master gain: intensityScale=' + intensityScale.toFixed(3) + ', volume=' + volume.toFixed(2) + ', targetGain=' + targetGain.toFixed(3) + ', soundEnabled=' + soundEnabled);
       masterGain.gain.linearRampToValueAtTime(targetGain, rampEnd);
       
       // Filter Q still varies with intensity for brightness
