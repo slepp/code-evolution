@@ -308,16 +308,32 @@ function getCommitHistory(repoDir, branch = 'main', afterCommit = null) {
   }
   
   try {
-    // Try main first, fall back to master
+    // Determine the actual branch to use
+    // Priority: requested branch -> main -> master -> default branch (from origin/HEAD)
     const branches = exec(`git -C "${repoDir}" branch -r`, { silent: true });
     const hasMain = branches.includes('origin/main');
     const hasMaster = branches.includes('origin/master');
     
     let actualBranch = branch;
-    if (branch === 'main' && !hasMain && hasMaster) {
-      actualBranch = 'master';
-      if (!JSON_PROGRESS) {
-        console.log('  (using master branch instead)');
+    if (branch === 'main' && !hasMain) {
+      if (hasMaster) {
+        actualBranch = 'master';
+        if (!JSON_PROGRESS) {
+          console.log('  (using master branch instead)');
+        }
+      } else {
+        // Neither main nor master exists - try to get the default branch from origin/HEAD
+        const defaultBranchRef = exec(`git -C "${repoDir}" symbolic-ref refs/remotes/origin/HEAD`, { silent: true, ignoreError: true });
+        if (defaultBranchRef && defaultBranchRef.trim()) {
+          // Extract branch name from "refs/remotes/origin/dev" -> "dev"
+          const match = defaultBranchRef.trim().match(/refs\/remotes\/origin\/(.+)/);
+          if (match) {
+            actualBranch = match[1];
+            if (!JSON_PROGRESS) {
+              console.log(`  (using default branch '${actualBranch}' instead)`);
+            }
+          }
+        }
       }
     }
     
@@ -495,6 +511,22 @@ function analyzeCommits(repoDir, commits, existingResults = []) {
         elapsed_seconds: elapsedSeconds,
         languages: Array.from(allLanguages).sort()
       });
+    }
+    
+    // Handle empty results case
+    if (results.length === 0) {
+      span.setAttributes({
+        'analyzer.languages.count': 0,
+        'analyzer.total_lines': 0,
+        'analyzer.duration_seconds': elapsedSeconds,
+      });
+      span.setStatus('ok');
+      
+      return {
+        results: [],
+        allLanguages: [],
+        analysisTime: elapsedSeconds
+      };
     }
     
     // Calculate stable sort order based on final commit
@@ -1394,9 +1426,10 @@ function generateHTML(data, repoUrl) {
 
     // Audio sonification
     const AUDIO_SUPPORTED = !!(window.AudioContext || window.webkitAudioContext);
-    // Major scale starting from C2 (65.41 Hz)
+    // Major scale starting from C4 (261.63 Hz) - audible on all speakers
+    // Using C4 (middle C) instead of C2 for better audibility
     // C, D, E, F, G, A, B, C, D, E, F, G, A, B, C, D...
-    const C2 = 65.41;
+    const C4 = 261.63;  // Middle C - 2 octaves higher than C2 for audibility
     const MAJOR_SCALE_SEMITONES = [0, 2, 4, 5, 7, 9, 11]; // Major scale intervals
     const FILTER_CUTOFF = 2500;        // Hz - saw brightness cap
     const FILTER_Q_BASE = 1;           // Resonance minimum
@@ -1653,18 +1686,25 @@ function generateHTML(data, repoUrl) {
     }
     
     function initAudio() {
-      if (audioCtx) return;
+      if (audioCtx) {
+        console.log('initAudio: Already initialized');
+        return;
+      }
 
+      console.log('initAudio: Creating AudioContext...');
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      console.log('initAudio: AudioContext created, state=' + audioCtx.state + ', sampleRate=' + audioCtx.sampleRate);
 
       // Create master gain (final output)
       masterGain = audioCtx.createGain();
       masterGain.gain.value = 0;
       masterGain.connect(audioCtx.destination);
+      console.log('initAudio: Master gain created and connected to destination');
 
       // Create reverb convolver
       reverb = audioCtx.createConvolver();
       reverb.buffer = createReverbImpulse(audioCtx.sampleRate, REVERB_DECAY, REVERB_PREDELAY);
+      console.log('initAudio: Reverb created with buffer length=' + reverb.buffer.length);
       
       // Create wet/dry mix gains
       reverbWetGain = audioCtx.createGain();
@@ -1678,6 +1718,7 @@ function generateHTML(data, repoUrl) {
       
       // Connect dry gain directly to master
       reverbDryGain.connect(masterGain);
+      console.log('initAudio: Reverb wet/dry paths connected');
 
       // Create shared lowpass filter - connects to both wet and dry paths
       filter = audioCtx.createBiquadFilter();
@@ -1686,10 +1727,12 @@ function generateHTML(data, repoUrl) {
       filter.Q.value = FILTER_Q_BASE;
       filter.connect(reverb);      // Wet path through reverb
       filter.connect(reverbDryGain); // Dry path bypasses reverb
+      console.log('initAudio: Filter created at ' + FILTER_CUTOFF + 'Hz, Q=' + FILTER_Q_BASE);
 
       // Create voice pool (oscillator + individual gain per voice)
       // Assign frequencies from major scale: C, D, E, F, G, A, B, C, D, E...
       // Each language gets a stable voice assignment
+      console.log('initAudio: Creating ' + MAX_VOICES + ' voices...');
       for (let i = 0; i < MAX_VOICES; i++) {
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
@@ -1700,7 +1743,7 @@ function generateHTML(data, repoUrl) {
         const octave = Math.floor(i / 7);
         const scaleStep = i % 7;
         const semitones = MAJOR_SCALE_SEMITONES[scaleStep] + (octave * 12);
-        const frequency = C2 * Math.pow(2, semitones / 12);
+        const frequency = C4 * Math.pow(2, semitones / 12);
         
         osc.frequency.value = frequency;
         // Detune each note by 0.3 to 1 cent for subtle chorusing
@@ -1712,7 +1755,12 @@ function generateHTML(data, repoUrl) {
         osc.start();
 
         voices.push({ osc, gain, lang: null });  // Track which language owns this voice
+        
+        if (i === 0 || i === MAX_VOICES - 1) {
+          console.log('initAudio: Voice ' + i + ' frequency=' + frequency.toFixed(2) + 'Hz, detune=' + osc.detune.value.toFixed(2) + ' cents');
+        }
       }
+      console.log('initAudio: All ' + voices.length + ' voices created and started');
       
       // Assign each language to a voice based on its index in ALL_LANGUAGES
       // This gives each language a stable pitch throughout the animation
@@ -1722,6 +1770,8 @@ function generateHTML(data, repoUrl) {
           voices[i].lang = lang;
         }
       });
+      console.log('initAudio: Language-to-voice mapping complete. Mapped ' + Object.keys(languageVoiceMap).length + ' languages');
+      console.log('initAudio: INITIALIZATION COMPLETE');
     }
 
     function updateAudio() {
@@ -1785,20 +1835,34 @@ function generateHTML(data, repoUrl) {
     }
 
     function resumeAudioContext() {
-      if (!audioCtx) return;
+      if (!audioCtx) {
+        console.log('resumeAudioContext: No audioCtx yet');
+        return;
+      }
+      console.log('resumeAudioContext: AudioContext state=' + audioCtx.state);
       if (audioCtx.state === 'suspended') {
-        audioCtx.resume();
+        console.log('resumeAudioContext: Resuming suspended context...');
+        audioCtx.resume().then(() => {
+          console.log('resumeAudioContext: Resumed! New state=' + audioCtx.state);
+        });
       }
     }
 
     function toggleSound() {
-      if (!AUDIO_SUPPORTED) return;
+      if (!AUDIO_SUPPORTED) {
+        console.log('toggleSound: Audio not supported');
+        return;
+      }
+
+      console.log('toggleSound: Called, current soundEnabled=' + soundEnabled);
 
       if (!audioCtx) {
+        console.log('toggleSound: Initializing audio for first time...');
         initAudio();
       }
 
       soundEnabled = !soundEnabled;
+      console.log('toggleSound: New soundEnabled=' + soundEnabled);
 
       // Update UI
       elements.soundToggle.classList.toggle('active', soundEnabled);
