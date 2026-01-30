@@ -1419,6 +1419,81 @@ function generateHTML(data, repoUrl) {
       border: none;
     }
 
+    .audio-controls {
+      display: flex;
+      gap: 1rem;
+      margin-top: 0.5rem;
+      padding: 0.75rem;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-default);
+      border-radius: 6px;
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+    }
+
+    .audio-controls.hidden {
+      display: none;
+    }
+
+    .audio-control-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.3rem;
+      flex: 1;
+    }
+
+    .audio-control-group label {
+      color: var(--text-tertiary);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-size: 0.65rem;
+    }
+
+    .audio-control-group input[type="range"] {
+      width: 100%;
+      height: 4px;
+      -webkit-appearance: none;
+      appearance: none;
+      background: var(--bg-tertiary);
+      border-radius: 2px;
+      cursor: pointer;
+    }
+
+    .audio-control-group input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 12px;
+      height: 12px;
+      background: var(--accent-purple);
+      border-radius: 50%;
+      cursor: pointer;
+    }
+
+    .audio-control-group input[type="range"]::-moz-range-thumb {
+      width: 12px;
+      height: 12px;
+      background: var(--accent-purple);
+      border-radius: 50%;
+      cursor: pointer;
+      border: none;
+    }
+
+    .audio-control-group select {
+      padding: 0.35rem 0.5rem;
+      border: 1px solid var(--border-default);
+      border-radius: 4px;
+      background: var(--bg-tertiary);
+      color: var(--text-primary);
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      cursor: pointer;
+    }
+
+    .audio-control-value {
+      color: var(--text-secondary);
+      font-size: 0.65rem;
+      margin-top: 0.2rem;
+    }
+
     .empty-state {
       text-align: center;
       padding: 2rem;
@@ -1633,6 +1708,25 @@ function generateHTML(data, repoUrl) {
             <div class="timeline-progress" id="timeline-progress"></div>
           </div>
         </div>
+
+        <div class="audio-controls" id="audio-controls">
+          <div class="audio-control-group">
+            <label>Gain Curve <span class="audio-control-value" id="gain-curve-value">0.4</span></label>
+            <input type="range" id="gain-curve" min="0.2" max="1.0" step="0.05" value="0.4">
+          </div>
+          <div class="audio-control-group">
+            <label>Intensity Curve</label>
+            <select id="intensity-curve">
+              <option value="log">Logarithmic (recommended)</option>
+              <option value="linear">Linear</option>
+              <option value="exp">Exponential</option>
+            </select>
+          </div>
+          <div class="audio-control-group">
+            <label>Stereo Width <span class="audio-control-value" id="stereo-width-value">70%</span></label>
+            <input type="range" id="stereo-width" min="0" max="100" step="5" value="70">
+          </div>
+        </div>
       </div>
 
       <div class="main-content">
@@ -1767,11 +1861,24 @@ function generateHTML(data, repoUrl) {
       totalDelta: document.getElementById('total-delta'),
       totalFiles: document.getElementById('total-files'),
       filesDelta: document.getElementById('files-delta'),
-      summaryStats: document.getElementById('summary-stats')
+      summaryStats: document.getElementById('summary-stats'),
+      audioControls: document.getElementById('audio-controls'),
+      gainCurve: document.getElementById('gain-curve'),
+      gainCurveValue: document.getElementById('gain-curve-value'),
+      intensityCurve: document.getElementById('intensity-curve'),
+      stereoWidth: document.getElementById('stereo-width'),
+      stereoWidthValue: document.getElementById('stereo-width-value')
     };
 
     // Current metric: 'lines', 'files', or 'bytes'
     let currentMetric = 'lines';
+
+    // Audio enhancement settings
+    let audioSettings = {
+      gainCurvePower: 0.4,      // Power curve for gain (lower = more boost for quiet languages)
+      intensityCurve: 'log',     // 'linear', 'log', or 'exp'
+      stereoWidth: 0.7           // 0-1, how much to spread voices in stereo field
+    };
     
     function escapeHtml(text) {
       const div = document.createElement('div');
@@ -2142,12 +2249,13 @@ function generateHTML(data, repoUrl) {
       filter.connect(reverb);      // Wet path through reverb
       filter.connect(reverbDryGain); // Dry path bypasses reverb
 
-      // Create voice pool (oscillator + individual gain per voice)
+      // Create voice pool (oscillator + individual gain + stereo panner per voice)
       // Assign frequencies from major scale: C, D, E, F, G, A, B, C, D, E...
-      // Each language gets a stable voice assignment
+      // Each language gets a stable voice assignment and stereo position
       for (let i = 0; i < MAX_VOICES; i++) {
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
+        const panner = audioCtx.createStereoPanner();
 
         osc.type = 'sine';  // Sine waves for smoother harmonic sound
         
@@ -2163,11 +2271,20 @@ function generateHTML(data, repoUrl) {
         osc.detune.value = baseDetune;
         gain.gain.value = 0;
 
+        // Calculate stereo position: spread voices across stereo field
+        // Map voice index to -1 (left) ... +1 (right)
+        const panPosition = MAX_VOICES > 1 
+          ? (i / (MAX_VOICES - 1)) * 2 - 1  // Spread from -1 to +1
+          : 0;  // Center if only one voice
+        panner.pan.value = panPosition;
+
+        // Chain: oscillator -> gain -> panner -> filter
         osc.connect(gain);
-        gain.connect(filter);
+        gain.connect(panner);
+        panner.connect(filter);
         osc.start();
 
-        voices.push({ osc, gain, lang: null, baseDetune });  // Track which language owns this voice
+        voices.push({ osc, gain, panner, lang: null, baseDetune, basePan: panPosition });
       }
       
       // Assign each language to a voice based on its index in ALL_LANGUAGES
@@ -2202,24 +2319,54 @@ function generateHTML(data, repoUrl) {
         const voiceData = metricData.voices[lang];
 
         if (voiceData) {
-          // Apply gain (proportion of total for current metric)
-          voice.gain.gain.linearRampToValueAtTime(voiceData.gain, rampEnd);
+          // Apply gain with perceptual power curve
+          // Power < 1.0 boosts quiet languages, making them more audible
+          const rawGain = voiceData.gain;
+          const perceivedGain = Math.pow(rawGain, audioSettings.gainCurvePower);
+          voice.gain.gain.linearRampToValueAtTime(perceivedGain, rampEnd);
+          
           // Apply detune: base chorusing + dynamic pitch variation
           voice.osc.detune.linearRampToValueAtTime(voice.baseDetune + voiceData.detune, rampEnd);
+          
+          // Apply stereo width: 0 = center, 1 = full spread
+          const targetPan = voice.basePan * audioSettings.stereoWidth;
+          voice.panner.pan.linearRampToValueAtTime(targetPan, rampEnd);
         } else {
           voice.gain.gain.linearRampToValueAtTime(0, rampEnd);
           voice.osc.detune.linearRampToValueAtTime(voice.baseDetune, rampEnd);
+          // Keep pan position even when silent (for smooth transitions)
+          const targetPan = voice.basePan * audioSettings.stereoWidth;
+          voice.panner.pan.linearRampToValueAtTime(targetPan, rampEnd);
         }
       });
 
-      // Use pre-computed master intensity for current metric
-      const intensityScale = VOLUME_MIN + (metricData.masterIntensity * (VOLUME_MAX - VOLUME_MIN));
+      // Apply intensity curve transformation
+      let adjustedIntensity = metricData.masterIntensity;
+      switch (audioSettings.intensityCurve) {
+        case 'log':
+          // Logarithmic: boosts early commits, compresses growth
+          // log(1 + x) / log(2) maps 0->0, 1->1 with gentle curve
+          adjustedIntensity = Math.log(1 + metricData.masterIntensity) / Math.log(2);
+          break;
+        case 'exp':
+          // Exponential: quiet early, dramatic growth feeling
+          adjustedIntensity = metricData.masterIntensity * metricData.masterIntensity;
+          break;
+        case 'linear':
+        default:
+          // Linear: use as-is
+          adjustedIntensity = metricData.masterIntensity;
+          break;
+      }
+
+      // Use transformed master intensity
+      const intensityScale = VOLUME_MIN + (adjustedIntensity * (VOLUME_MAX - VOLUME_MIN));
       const volume = elements.soundVolume.value / 100;
       const targetGain = soundEnabled ? intensityScale * volume * 0.5 : 0;
       masterGain.gain.linearRampToValueAtTime(targetGain, rampEnd);
 
       // Filter Q varies with intensity for brightness
-      filter.Q.linearRampToValueAtTime(FILTER_Q_BASE + metricData.masterIntensity * FILTER_Q_MAX, rampEnd);
+      filter.Q.linearRampToValueAtTime(FILTER_Q_BASE + adjustedIntensity * FILTER_Q_MAX, rampEnd);
     }
 
     function fadeOutAudio() {
@@ -2497,16 +2644,81 @@ function generateHTML(data, repoUrl) {
 
     // Sound controls
     if (AUDIO_SUPPORTED) {
-      elements.soundToggle.addEventListener('click', toggleSound);
+      elements.soundToggle.addEventListener('click', () => {
+        toggleSound();
+        // Show/hide advanced audio controls based on sound state
+        if (soundEnabled) {
+          elements.audioControls.classList.remove('hidden');
+        } else {
+          elements.audioControls.classList.add('hidden');
+        }
+      });
+
       elements.soundVolume.addEventListener('input', () => {
         // Update audio to reflect new volume
         if (audioCtx) {
           updateAudio();
         }
       });
+
+      // Audio enhancement controls
+      elements.gainCurve.addEventListener('input', (e) => {
+        const value = parseFloat(e.target.value);
+        audioSettings.gainCurvePower = value;
+        elements.gainCurveValue.textContent = value.toFixed(2);
+        if (audioCtx && soundEnabled) {
+          updateAudio();
+        }
+        localStorage.setItem('audioGainCurve', value);
+      });
+
+      elements.intensityCurve.addEventListener('change', (e) => {
+        audioSettings.intensityCurve = e.target.value;
+        if (audioCtx && soundEnabled) {
+          updateAudio();
+        }
+        localStorage.setItem('audioIntensityCurve', e.target.value);
+      });
+
+      elements.stereoWidth.addEventListener('input', (e) => {
+        const value = parseInt(e.target.value) / 100;  // Convert 0-100 to 0-1
+        audioSettings.stereoWidth = value;
+        elements.stereoWidthValue.textContent = e.target.value + '%';
+        if (audioCtx && soundEnabled) {
+          updateAudio();
+        }
+        localStorage.setItem('audioStereoWidth', value);
+      });
+
+      // Load settings from localStorage
+      const savedGainCurve = localStorage.getItem('audioGainCurve');
+      if (savedGainCurve !== null) {
+        const value = parseFloat(savedGainCurve);
+        audioSettings.gainCurvePower = value;
+        elements.gainCurve.value = value;
+        elements.gainCurveValue.textContent = value.toFixed(2);
+      }
+
+      const savedIntensityCurve = localStorage.getItem('audioIntensityCurve');
+      if (savedIntensityCurve !== null) {
+        audioSettings.intensityCurve = savedIntensityCurve;
+        elements.intensityCurve.value = savedIntensityCurve;
+      }
+
+      const savedStereoWidth = localStorage.getItem('audioStereoWidth');
+      if (savedStereoWidth !== null) {
+        const value = parseFloat(savedStereoWidth);
+        audioSettings.stereoWidth = value;
+        elements.stereoWidth.value = Math.round(value * 100);
+        elements.stereoWidthValue.textContent = Math.round(value * 100) + '%';
+      }
+
+      // Initially hide audio controls
+      elements.audioControls.classList.add('hidden');
     } else {
       // Hide sound controls if Web Audio not supported
       elements.soundControl.classList.add('hidden');
+      elements.audioControls.classList.add('hidden');
     }
 
     // Keyboard controls
