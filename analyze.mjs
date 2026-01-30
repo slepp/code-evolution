@@ -2337,16 +2337,29 @@ function generateHTML(data, repoUrl) {
 
       const masterIntensity = metricData[0];
 
-      // First, silence all voices (sparse format only includes non-zero)
-      for (let i = 0; i < MAX_VOICES && i < voices.length; i++) {
-        const voice = voices[i];
-        voice.gain.gain.linearRampToValueAtTime(0, rampEnd);
-        voice.osc.detune.linearRampToValueAtTime(voice.baseDetune, rampEnd);
-        const targetPan = voice.basePan * audioSettings.stereoWidth;
-        voice.panner.pan.linearRampToValueAtTime(targetPan, rampEnd);
+      // Build set of active voice indices for this frame
+      const activeVoices = new Set();
+      for (let j = 1; j < metricData.length; j++) {
+        const [langIndex] = metricData[j];
+        if (langIndex < MAX_VOICES && langIndex < voices.length) {
+          activeVoices.add(langIndex);
+        }
       }
 
-      // Apply gains only for active voices (sparse data)
+      // Update all voices: active ones get their target, inactive ones fade to silence
+      for (let i = 0; i < MAX_VOICES && i < voices.length; i++) {
+        const voice = voices[i];
+        const targetPan = voice.basePan * audioSettings.stereoWidth;
+
+        if (!activeVoices.has(i)) {
+          // Inactive voice: fade to silence
+          voice.gain.gain.linearRampToValueAtTime(0, rampEnd);
+          voice.osc.detune.linearRampToValueAtTime(voice.baseDetune, rampEnd);
+          voice.panner.pan.linearRampToValueAtTime(targetPan, rampEnd);
+        }
+      }
+
+      // Apply gains for active voices (sparse data)
       for (let j = 1; j < metricData.length; j++) {
         const [langIndex, gain, detune] = metricData[j];
         if (langIndex >= MAX_VOICES || langIndex >= voices.length) continue;
