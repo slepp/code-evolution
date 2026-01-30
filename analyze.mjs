@@ -21,7 +21,7 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'fs
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const SCHEMA_VERSION = '2.0';
+const SCHEMA_VERSION = '2.1';  // Added pre-computed audio data
 
 // =============================================================================
 // OpenTelemetry Tracing (optional - only active when env vars are set)
@@ -236,6 +236,10 @@ let COUNTER_TOOL = 'scc';
 
 // Exclude directories for code counting (common build/dependency folders)
 const EXCLUDE_DIRS = ['node_modules', '.git', 'dist', 'build', 'target', 'pkg', '.venv', 'venv', '__pycache__', '.pytest_cache', '.mypy_cache', 'vendor'];
+
+// Audio sonification constants (used for pre-computing audio data)
+const AUDIO_MAX_VOICES = 16;           // Max languages with audio
+const AUDIO_DETUNE_MAX = 25;           // Max pitch variation in cents (+/- 25)
 
 /**
  * Emit a progress event as JSONL to stderr
@@ -692,6 +696,91 @@ function analyzeCommits(repoDir, commits, existingResults = []) {
 }
 
 /**
+ * Compute pre-baked audio data for all commits.
+ * This moves audio state calculation from browser runtime to build time.
+ * 
+ * For each commit, we compute:
+ * - voices: array of { gain, detune } for each language (up to MAX_VOICES)
+ * - masterIntensity: normalized total lines (0-1 range)
+ * 
+ * @param {Array} results - Analysis results array
+ * @param {Array} allLanguages - Sorted language list (determines voice assignment)
+ * @returns {Array} Audio data array, one entry per commit
+ */
+function computeAudioData(results, allLanguages) {
+  if (results.length === 0) return [];
+  
+  // Find global min/max lines for intensity normalization
+  let minLines = Infinity;
+  let maxLines = 0;
+  
+  for (const commit of results) {
+    let totalLines = 0;
+    for (const lang in commit.languages) {
+      totalLines += commit.languages[lang].code || 0;
+    }
+    minLines = Math.min(minLines, totalLines);
+    maxLines = Math.max(maxLines, totalLines);
+  }
+  
+  const audioData = [];
+  
+  for (let i = 0; i < results.length; i++) {
+    const commit = results[i];
+    const prevCommit = i > 0 ? results[i - 1] : null;
+    
+    // Calculate total lines for this commit
+    let totalLines = 0;
+    for (const lang in commit.languages) {
+      totalLines += commit.languages[lang].code || 0;
+    }
+    
+    // Compute normalized intensity (0-1)
+    const masterIntensity = maxLines > minLines
+      ? (totalLines - minLines) / (maxLines - minLines)
+      : 1;
+    
+    // Compute voice data for each language (up to MAX_VOICES)
+    const voices = {};
+    
+    for (let v = 0; v < Math.min(allLanguages.length, AUDIO_MAX_VOICES); v++) {
+      const lang = allLanguages[v];
+      const lines = commit.languages[lang]?.code || 0;
+      const prevLines = prevCommit?.languages[lang]?.code || 0;
+      
+      // Gain is proportion of total lines (0-1)
+      const gain = totalLines > 0 ? lines / totalLines : 0;
+      
+      // Detune based on growth trend (+/- AUDIO_DETUNE_MAX cents)
+      // Growing = positive detune (pitch up), shrinking = negative (pitch down)
+      let detune = 0;
+      if (prevCommit && prevLines > 0) {
+        // Calculate growth rate: (current - prev) / prev
+        // Clamp to reasonable range to avoid extreme values
+        const growthRate = (lines - prevLines) / prevLines;
+        // Map growth rate to detune: ±100% growth → ±AUDIO_DETUNE_MAX cents
+        detune = Math.max(-AUDIO_DETUNE_MAX, Math.min(AUDIO_DETUNE_MAX, growthRate * AUDIO_DETUNE_MAX));
+      } else if (lines > 0 && prevLines === 0) {
+        // New language appeared - slight pitch up
+        detune = AUDIO_DETUNE_MAX * 0.5;
+      }
+      
+      voices[lang] = {
+        gain: Math.round(gain * 10000) / 10000,  // Round to 4 decimal places
+        detune: Math.round(detune * 100) / 100   // Round to 2 decimal places
+      };
+    }
+    
+    audioData.push({
+      masterIntensity: Math.round(masterIntensity * 10000) / 10000,
+      voices
+    });
+  }
+  
+  return audioData;
+}
+
+/**
  * Load existing data.json if it exists
  */
 function loadExistingData(outputDir) {
@@ -730,6 +819,9 @@ function loadExistingData(outputDir) {
 function createDataStructure(repoUrl, results, allLanguages, analysisTime, counterInfo) {
   const lastCommit = results.length > 0 ? results[results.length - 1] : null;
   
+  // Compute pre-baked audio data for all commits
+  const audioData = computeAudioData(results, allLanguages);
+  
   return {
     schema_version: SCHEMA_VERSION,
     metadata: {
@@ -745,7 +837,8 @@ function createDataStructure(repoUrl, results, allLanguages, analysisTime, count
       last_commit_date: lastCommit ? lastCommit.date : null
     },
     results: results,
-    allLanguages: allLanguages
+    allLanguages: allLanguages,
+    audioData: audioData  // Pre-computed audio state per commit
   };
 }
 
@@ -1533,6 +1626,7 @@ function generateHTML(data, repoUrl) {
   <script>
     const DATA = ${JSON.stringify(results)};
     const ALL_LANGUAGES = ${JSON.stringify(allLanguages)};
+    const AUDIO_DATA = ${JSON.stringify(data.audioData || [])};  // Pre-computed audio state
 
     let currentIndex = 0;
     let isPlaying = false;
@@ -1553,7 +1647,7 @@ function generateHTML(data, repoUrl) {
     // Major scale starting from C4 (261.63 Hz) - audible on all speakers
     // Using C4 (middle C) instead of C2 for better audibility
     // C, D, E, F, G, A, B, C, D, E, F, G, A, B, C, D...
-    const C4 = 261.63;  // Middle C - 2 octaves higher than C2 for audibility
+    const C3 = 130.81;  // C3 - one octave below middle C, pleasant and audible on laptops
     const MAJOR_SCALE_SEMITONES = [0, 2, 4, 5, 7, 9, 11]; // Major scale intervals
     const FILTER_CUTOFF = 2500;        // Hz - saw brightness cap
     const FILTER_Q_BASE = 1;           // Resonance minimum
@@ -1565,6 +1659,7 @@ function generateHTML(data, repoUrl) {
     const REVERB_DECAY = 1.5;          // Reverb decay time in seconds
     const REVERB_PREDELAY = 0.02;      // Reverb predelay in seconds
     const REVERB_WET = 0.15;           // Reverb wet mix (0-1)
+    const FADE_OUT_TIME_MS = 500;      // Time to fade out audio at end
 
     let audioCtx = null;
     let soundEnabled = false;
@@ -1575,6 +1670,7 @@ function generateHTML(data, repoUrl) {
     let reverbDryGain = null;
     let voices = [];
     let languageVoiceMap = {};  // Map language name to voice index (stable assignment)
+    let isFadingOut = false;    // Track if we're fading out audio
 
     // Data visualization color palette - vivid, distinct colors
     const LANGUAGE_COLORS = {};
@@ -1857,18 +1953,19 @@ function generateHTML(data, repoUrl) {
         const octave = Math.floor(i / 7);
         const scaleStep = i % 7;
         const semitones = MAJOR_SCALE_SEMITONES[scaleStep] + (octave * 12);
-        const frequency = C4 * Math.pow(2, semitones / 12);
+        const frequency = C3 * Math.pow(2, semitones / 12);
         
         osc.frequency.value = frequency;
-        // Detune each note by 0.3 to 1 cent for subtle chorusing
-        osc.detune.value = 0.3 + (Math.random() * 0.7);
+        // Base detune: slight chorusing (0.3 to 1 cent)
+        const baseDetune = 0.3 + (Math.random() * 0.7);
+        osc.detune.value = baseDetune;
         gain.gain.value = 0;
 
         osc.connect(gain);
         gain.connect(filter);
         osc.start();
 
-        voices.push({ osc, gain, lang: null });  // Track which language owns this voice
+        voices.push({ osc, gain, lang: null, baseDetune });  // Track which language owns this voice
       }
       
       // Assign each language to a voice based on its index in ALL_LANGUAGES
@@ -1882,58 +1979,104 @@ function generateHTML(data, repoUrl) {
     }
 
     function updateAudio() {
-      if (!audioCtx) return;
+      if (!audioCtx || isFadingOut) return;
 
       const now = audioCtx.currentTime;
       const rampEnd = now + (RAMP_TIME_MS / 1000);
       const commit = DATA[currentIndex];
+      const audioFrame = AUDIO_DATA[currentIndex];
 
-      // Calculate total lines for this commit
-      let totalLines = 0;
-      const languageData = {};
-      ALL_LANGUAGES.forEach(lang => {
-        const lines = commit.languages[lang]?.code || 0;
-        languageData[lang] = lines;
-        totalLines += lines;
-      });
+      // Use pre-computed audio data if available (schema 2.1+)
+      if (audioFrame && audioFrame.voices) {
+        // Apply pre-computed voice gains and detunes
+        ALL_LANGUAGES.forEach((lang, i) => {
+          if (i >= MAX_VOICES) return;
+          
+          const voice = voices[i];
+          const voiceData = audioFrame.voices[lang];
+          
+          if (voiceData) {
+            // Apply gain (proportion of total lines)
+            voice.gain.gain.linearRampToValueAtTime(voiceData.gain, rampEnd);
+            // Apply detune: base chorusing + dynamic pitch variation
+            voice.osc.detune.linearRampToValueAtTime(voice.baseDetune + voiceData.detune, rampEnd);
+          } else {
+            voice.gain.gain.linearRampToValueAtTime(0, rampEnd);
+            voice.osc.detune.linearRampToValueAtTime(voice.baseDetune, rampEnd);
+          }
+        });
 
-      // Update each voice based on its assigned language's proportion at this commit
-      ALL_LANGUAGES.forEach((lang, i) => {
-        if (i >= MAX_VOICES) return;
+        // Use pre-computed master intensity
+        const intensityScale = VOLUME_MIN + (audioFrame.masterIntensity * (VOLUME_MAX - VOLUME_MIN));
+        const volume = elements.soundVolume.value / 100;
+        const targetGain = soundEnabled ? intensityScale * volume * 0.5 : 0;
+        masterGain.gain.linearRampToValueAtTime(targetGain, rampEnd);
         
-        const voice = voices[i];
-        const lines = languageData[lang];
-        // Proportion is per-commit: this language's lines / total lines at this commit
-        const proportion = totalLines > 0 ? lines / totalLines : 0;
-        
-        // Voice frequency never changes - only gain modulates
-        // This creates the THX-like effect where each tone independently fades in/out
-        voice.gain.gain.linearRampToValueAtTime(proportion, rampEnd);
-      });
+        // Filter Q varies with intensity for brightness
+        filter.Q.linearRampToValueAtTime(FILTER_Q_BASE + audioFrame.masterIntensity * FILTER_Q_MAX, rampEnd);
+      } else {
+        // Fallback: runtime calculation for older data files without audioData
+        let totalLines = 0;
+        const languageData = {};
+        ALL_LANGUAGES.forEach(lang => {
+          const lines = commit.languages[lang]?.code || 0;
+          languageData[lang] = lines;
+          totalLines += lines;
+        });
 
-      // Master gain with volume variation based on total lines
-      // Find min/max lines across all commits for scaling
-      let minLines = Infinity, maxLines = 0;
-      DATA.forEach(c => {
-        const lines = Object.values(c.languages).reduce((sum, lang) => sum + (lang.code || 0), 0);
-        minLines = Math.min(minLines, lines);
-        maxLines = Math.max(maxLines, lines);
-      });
+        ALL_LANGUAGES.forEach((lang, i) => {
+          if (i >= MAX_VOICES) return;
+          
+          const voice = voices[i];
+          const lines = languageData[lang];
+          const proportion = totalLines > 0 ? lines / totalLines : 0;
+          voice.gain.gain.linearRampToValueAtTime(proportion, rampEnd);
+          // Reset detune to base (no dynamic variation in fallback mode)
+          voice.osc.detune.linearRampToValueAtTime(voice.baseDetune, rampEnd);
+        });
+
+        // Calculate intensity from scratch
+        let minLines = Infinity, maxLines = 0;
+        DATA.forEach(c => {
+          const lines = Object.values(c.languages).reduce((sum, lang) => sum + (lang.code || 0), 0);
+          minLines = Math.min(minLines, lines);
+          maxLines = Math.max(maxLines, lines);
+        });
+        
+        const normalizedIntensity = maxLines > minLines 
+          ? (totalLines - minLines) / (maxLines - minLines)
+          : 1;
+        const intensityScale = VOLUME_MIN + (normalizedIntensity * (VOLUME_MAX - VOLUME_MIN));
+        
+        const volume = elements.soundVolume.value / 100;
+        const targetGain = soundEnabled ? intensityScale * volume * 0.5 : 0;
+        masterGain.gain.linearRampToValueAtTime(targetGain, rampEnd);
+        filter.Q.linearRampToValueAtTime(FILTER_Q_BASE + normalizedIntensity * FILTER_Q_MAX, rampEnd);
+      }
+    }
+
+    function fadeOutAudio() {
+      if (!audioCtx || !soundEnabled || isFadingOut) return;
+      isFadingOut = true;
       
-      // Scale current total lines to VOLUME_MIN-VOLUME_MAX range
-      const normalizedIntensity = maxLines > minLines 
-        ? (totalLines - minLines) / (maxLines - minLines)
-        : 1;
-      const intensityScale = VOLUME_MIN + (normalizedIntensity * (VOLUME_MAX - VOLUME_MIN));
+      const now = audioCtx.currentTime;
+      const fadeEnd = now + (FADE_OUT_TIME_MS / 1000);
       
-      const volume = elements.soundVolume.value / 100;
+      // Fade master gain to zero
+      masterGain.gain.linearRampToValueAtTime(0, fadeEnd);
       
-      // Master gain controls audibility
-      const targetGain = soundEnabled ? intensityScale * volume * 0.5 : 0;
-      masterGain.gain.linearRampToValueAtTime(targetGain, rampEnd);
-      
-      // Filter Q still varies with intensity for brightness
-      filter.Q.linearRampToValueAtTime(FILTER_Q_BASE + normalizedIntensity * FILTER_Q_MAX, rampEnd);
+      // After fade completes, silence all voices and reset detune
+      setTimeout(() => {
+        if (!audioCtx) return;
+        voices.forEach(voice => {
+          voice.gain.gain.setValueAtTime(0, audioCtx.currentTime);
+          voice.osc.detune.setValueAtTime(voice.baseDetune, audioCtx.currentTime);
+        });
+      }, FADE_OUT_TIME_MS);
+    }
+
+    function resetAudioState() {
+      isFadingOut = false;
     }
 
     function resumeAudioContext() {
@@ -2098,6 +2241,7 @@ function generateHTML(data, repoUrl) {
         currentIndex++;
         if (currentIndex >= DATA.length) {
           currentIndex = DATA.length - 1;
+          fadeOutAudio();
           pause();
         }
         updateDisplay();
@@ -2129,6 +2273,7 @@ function generateHTML(data, repoUrl) {
     
     function reset() {
       pause();
+      resetAudioState();
       currentIndex = 0;
       updateDisplay();
     }
@@ -2136,6 +2281,7 @@ function generateHTML(data, repoUrl) {
     function goLatest() {
       pause();
       currentIndex = DATA.length - 1;
+      fadeOutAudio();
       updateDisplay();
     }
 

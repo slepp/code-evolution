@@ -1,6 +1,6 @@
 {
   "name": "cloc-history-analyzer",
-  "version": "0.4.0",
+  "version": "0.6.0",
   "description": "Visualize code evolution over time with interactive animated graphs. Analyzes git history using cloc with incremental updates.",
   "type": "module",
   "main": "analyze.mjs",
