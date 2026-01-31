@@ -1007,6 +1007,104 @@ function generateHTML(data, repoUrl) {
       padding: 1rem 1.5rem 1.5rem;
     }
 
+    /* Sticky compact control bar - appears when scrolling */
+    .compact-controls {
+      position: fixed;
+      top: 0;
+      left: 50%;
+      transform: translateX(-50%) translateY(-100%);
+      z-index: 1000;
+      background: var(--bg-primary);
+      border: 1px solid var(--border-default);
+      border-top: none;
+      border-radius: 0 0 12px 12px;
+      padding: 0.5rem 1rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+      transition: transform 0.25s var(--ease-out);
+      max-width: 95vw;
+    }
+
+    .compact-controls.visible {
+      transform: translateX(-50%) translateY(0);
+    }
+
+    .compact-controls::before {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: linear-gradient(90deg,
+        var(--accent-cyan) 0%,
+        var(--accent-purple) 50%,
+        var(--accent-pink) 100%
+      );
+      border-radius: 0 0 12px 12px;
+    }
+
+    .compact-controls .commit-compact {
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      color: var(--text-secondary);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .compact-controls .commit-compact .date {
+      color: var(--accent-cyan);
+      font-weight: 600;
+    }
+
+    .compact-controls .commit-compact .number {
+      color: var(--text-tertiary);
+      font-size: 0.6rem;
+    }
+
+    .compact-controls .compact-btns {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+
+    .compact-controls button {
+      padding: 0.3rem 0.6rem;
+      font-size: 0.65rem;
+    }
+
+    .compact-controls button.primary {
+      padding: 0.35rem 0.75rem;
+      font-size: 0.7rem;
+    }
+
+    .compact-controls .timeline-mini {
+      width: 120px;
+      height: 4px;
+      background: var(--bg-tertiary);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+
+    .compact-controls .timeline-mini-progress {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent-cyan), var(--accent-purple));
+      border-radius: 2px;
+      transition: width 0.1s linear;
+    }
+
+    .compact-controls .sound-compact {
+      display: flex;
+      align-items: center;
+    }
+
+    .compact-controls .sound-compact button {
+      padding: 0.3rem 0.4rem;
+    }
+
     .main-content {
       display: flex;
       gap: 1.25rem;
@@ -1130,6 +1228,32 @@ function generateHTML(data, repoUrl) {
       overflow-y: auto;
       max-height: 450px;
       border-radius: 8px;
+    }
+
+    /* Custom scrollbar for table */
+    .table-container::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    .table-container::-webkit-scrollbar-track {
+      background: var(--bg-tertiary);
+      border-radius: 4px;
+    }
+
+    .table-container::-webkit-scrollbar-thumb {
+      background: var(--border-default);
+      border-radius: 4px;
+      border: 2px solid var(--bg-tertiary);
+    }
+
+    .table-container::-webkit-scrollbar-thumb:hover {
+      background: var(--accent-cyan);
+    }
+
+    /* Firefox scrollbar */
+    .table-container {
+      scrollbar-width: thin;
+      scrollbar-color: var(--border-default) var(--bg-tertiary);
     }
 
     table {
@@ -1718,6 +1842,32 @@ function generateHTML(data, repoUrl) {
   </style>
 </head>
 <body>
+  <!-- Compact sticky control bar (appears on scroll) -->
+  <div class="compact-controls" id="compact-controls">
+    <div class="commit-compact">
+      <span class="date" id="compact-date">---</span>
+      <span class="number" id="compact-number">0/0</span>
+    </div>
+    <div class="timeline-mini">
+      <div class="timeline-mini-progress" id="compact-progress"></div>
+    </div>
+    <div class="compact-btns">
+      <button id="compact-play" class="primary">Play</button>
+      <button id="compact-latest" class="secondary">Latest</button>
+      <button id="compact-reset" class="secondary">Reset</button>
+    </div>
+    <div class="sound-compact">
+      <button id="compact-sound" class="secondary sound-btn" title="Toggle sound">
+        <svg class="sound-icon compact-sound-off" viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+          <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>
+        </svg>
+        <svg class="sound-icon compact-sound-on" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="display:none">
+          <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
   <div class="container">
     <div class="header">
       <h1>Code Evolution</h1>
@@ -2059,7 +2209,18 @@ function generateHTML(data, repoUrl) {
       gainCurveValue: document.getElementById('gain-curve-value'),
       intensityCurve: document.getElementById('intensity-curve'),
       stereoWidth: document.getElementById('stereo-width'),
-      stereoWidthValue: document.getElementById('stereo-width-value')
+      stereoWidthValue: document.getElementById('stereo-width-value'),
+      // Compact controls bar
+      compactControls: document.getElementById('compact-controls'),
+      compactDate: document.getElementById('compact-date'),
+      compactNumber: document.getElementById('compact-number'),
+      compactProgress: document.getElementById('compact-progress'),
+      compactPlay: document.getElementById('compact-play'),
+      compactLatest: document.getElementById('compact-latest'),
+      compactReset: document.getElementById('compact-reset'),
+      compactSound: document.getElementById('compact-sound'),
+      compactSoundOff: document.querySelector('.compact-sound-off'),
+      compactSoundOn: document.querySelector('.compact-sound-on')
     };
 
     // Current metric: 'lines', 'files', or 'bytes'
@@ -3000,6 +3161,9 @@ function generateHTML(data, repoUrl) {
       elements.soundToggle.classList.toggle('active', soundEnabled);
       elements.soundIconOff.style.display = soundEnabled ? 'none' : 'block';
       elements.soundIconOn.style.display = soundEnabled ? 'block' : 'none';
+      elements.compactSound.classList.toggle('active', soundEnabled);
+      elements.compactSoundOff.style.display = soundEnabled ? 'none' : 'block';
+      elements.compactSoundOn.style.display = soundEnabled ? 'block' : 'none';
 
       // Resume audio context if needed (browser autoplay policy)
       if (soundEnabled) {
@@ -3049,6 +3213,11 @@ function generateHTML(data, repoUrl) {
       // Update timeline
       const progress = ((currentIndex + 1) / DATA.length) * 100;
       elements.timeline.style.width = progress + '%';
+
+      // Update compact controls bar
+      elements.compactDate.textContent = frame.date;
+      elements.compactNumber.textContent = \`\${currentIndex + 1}/\${DATA.length}\`;
+      elements.compactProgress.style.width = progress + '%';
 
       // Update audio sonification
       updateAudio();
@@ -3204,6 +3373,8 @@ function generateHTML(data, repoUrl) {
       isPlaying = true;
       elements.playPause.textContent = 'Pause';
       elements.playPause.classList.remove('primary');
+      elements.compactPlay.textContent = 'Pause';
+      elements.compactPlay.classList.remove('primary');
 
       // Resume audio context if sound is enabled
       if (soundEnabled) {
@@ -3244,6 +3415,8 @@ function generateHTML(data, repoUrl) {
       isPlaying = false;
       elements.playPause.textContent = 'Play';
       elements.playPause.classList.add('primary');
+      elements.compactPlay.textContent = 'Play';
+      elements.compactPlay.classList.add('primary');
 
       // Cancel animation frame
       if (animationFrameId) {
@@ -3487,6 +3660,42 @@ function generateHTML(data, repoUrl) {
     document.addEventListener('touchend', () => {
       isSeeking = false;
     });
+
+    // Compact controls - show when scrolled past main controls
+    let compactControlsVisible = false;
+    const controlsSection = document.querySelector('.top-bar');
+
+    function updateCompactControlsVisibility() {
+      const rect = controlsSection.getBoundingClientRect();
+      const shouldShow = rect.bottom < 0;
+
+      if (shouldShow !== compactControlsVisible) {
+        compactControlsVisible = shouldShow;
+        elements.compactControls.classList.toggle('visible', shouldShow);
+      }
+    }
+
+    window.addEventListener('scroll', updateCompactControlsVisibility, { passive: true });
+
+    // Compact control button handlers
+    elements.compactPlay.addEventListener('click', () => {
+      if (isPlaying) pause();
+      else play();
+    });
+
+    elements.compactLatest.addEventListener('click', goLatest);
+    elements.compactReset.addEventListener('click', reset);
+
+    if (AUDIO_SUPPORTED) {
+      elements.compactSound.addEventListener('click', () => {
+        toggleSound();
+        if (soundEnabled) {
+          elements.audioControls.classList.remove('hidden');
+        } else {
+          elements.audioControls.classList.add('hidden');
+        }
+      });
+    }
 
     // Initialize
     initTable();
