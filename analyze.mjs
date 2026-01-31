@@ -885,7 +885,7 @@ function generateHTML(data, repoUrl) {
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <!-- Chart.js removed - using custom high-performance Canvas renderer -->
   <style>
     :root {
       /* Terminal dark palette */
@@ -1046,7 +1046,41 @@ function generateHTML(data, repoUrl) {
     }
 
     #chart-canvas {
-      max-height: 100%;
+      width: 100%;
+      height: calc(100% - 32px);
+    }
+
+    .chart-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem 1rem;
+      padding: 0.5rem 0 0;
+      justify-content: center;
+    }
+
+    .chart-legend-item {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-family: var(--font-mono);
+      font-size: 0.6rem;
+      color: var(--text-secondary);
+      cursor: default;
+      transition: opacity 0.15s;
+    }
+
+    .chart-legend-item:hover {
+      opacity: 0.7;
+    }
+
+    .chart-legend-item.inactive {
+      opacity: 0.3;
+    }
+
+    .chart-legend-color {
+      width: 8px;
+      height: 8px;
+      border-radius: 2px;
     }
 
     .commit-info {
@@ -1144,6 +1178,16 @@ function generateHTML(data, repoUrl) {
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .language-color {
+      width: 10px;
+      height: 10px;
+      border-radius: 2px;
+      flex-shrink: 0;
     }
 
     .percentage-text {
@@ -1232,7 +1276,13 @@ function generateHTML(data, repoUrl) {
 
     .controls {
       display: flex;
-      justify-content: center;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.5rem;
+    }
+
+    .controls-row {
+      display: flex;
       align-items: center;
       gap: 0.75rem;
       flex-wrap: wrap;
@@ -1248,6 +1298,27 @@ function generateHTML(data, repoUrl) {
       gap: 0.35rem;
       padding-left: 0.5rem;
       border-left: 1px solid var(--border-muted);
+    }
+
+    .controls-options {
+      gap: 1rem;
+    }
+
+    .audio-tip {
+      font-size: 0.65rem;
+      font-family: var(--font-mono);
+      color: var(--text-tertiary);
+      opacity: 0.6;
+    }
+
+    .audio-tip kbd {
+      display: inline-block;
+      padding: 0.1rem 0.35rem;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-default);
+      border-radius: 3px;
+      font-size: 0.6rem;
+      font-weight: 600;
     }
 
     button {
@@ -1664,42 +1735,47 @@ function generateHTML(data, repoUrl) {
         </div>
 
         <div class="controls">
-          <div class="controls-primary">
-            <button id="play-pause" class="primary">Play</button>
-            <button id="go-latest" class="primary">Latest</button>
+          <div class="controls-row">
+            <div class="controls-primary">
+              <button id="play-pause" class="primary">Play</button>
+              <button id="go-latest" class="primary">Latest</button>
+            </div>
+            <div class="controls-secondary">
+              <button id="prev" class="secondary">Prev</button>
+              <button id="next" class="secondary">Next</button>
+              <button id="reset" class="secondary">Reset</button>
+            </div>
           </div>
-          <div class="controls-secondary">
-            <button id="prev" class="secondary">Prev</button>
-            <button id="next" class="secondary">Next</button>
-            <button id="reset" class="secondary">Reset</button>
-          </div>
-          <div class="speed-control">
-            <label>Speed</label>
-            <select id="speed">
-              <option value="0.5">0.5x</option>
-              <option value="1" selected>1x</option>
-              <option value="2">2x</option>
-              <option value="4">4x</option>
-            </select>
-          </div>
-          <div class="metric-control">
-            <label>Metric</label>
-            <select id="metric">
-              <option value="lines" selected>Lines</option>
-              <option value="files">Files</option>
-              <option value="bytes">Bytes</option>
-            </select>
-          </div>
-          <div class="sound-control" id="sound-control">
-            <button id="sound-toggle" class="secondary sound-btn" title="Toggle sound">
-              <svg class="sound-icon sound-off" viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
-                <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>
-              </svg>
-              <svg class="sound-icon sound-on" viewBox="0 0 24 24" width="18" height="18" fill="currentColor" style="display:none">
-                <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
-              </svg>
-            </button>
-            <input type="range" id="sound-volume" min="0" max="100" value="70" title="Volume">
+          <div class="audio-tip" id="audio-tip">Press <kbd>space</kbd> to play · <kbd>S</kbd> to toggle sound</div>
+          <div class="controls-row controls-options">
+            <div class="sound-control" id="sound-control">
+              <button id="sound-toggle" class="secondary sound-btn" title="Toggle sound">
+                <svg class="sound-icon sound-off" viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                  <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>
+                </svg>
+                <svg class="sound-icon sound-on" viewBox="0 0 24 24" width="18" height="18" fill="currentColor" style="display:none">
+                  <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+                </svg>
+              </button>
+              <input type="range" id="sound-volume" min="0" max="100" value="70" title="Volume">
+            </div>
+            <div class="speed-control">
+              <label>Speed</label>
+              <select id="speed">
+                <option value="0.5">0.5x</option>
+                <option value="1" selected>1x</option>
+                <option value="2">2x</option>
+                <option value="4">4x</option>
+              </select>
+            </div>
+            <div class="metric-control">
+              <label>Metric</label>
+              <select id="metric">
+                <option value="lines" selected>Lines</option>
+                <option value="files">Files</option>
+                <option value="bytes">Bytes</option>
+              </select>
+            </div>
           </div>
         </div>
 
@@ -1766,6 +1842,7 @@ function generateHTML(data, repoUrl) {
         <div class="right-panel">
           <div class="chart-container">
             <canvas id="chart-canvas"></canvas>
+            <div class="chart-legend" id="chart-legend"></div>
           </div>
         </div>
       </div>
@@ -1785,8 +1862,7 @@ function generateHTML(data, repoUrl) {
     let currentIndex = 0;
     let isPlaying = false;
     let animationInterval = null;
-    let chart = null;
-    let lastChartIndex = -1; // Track last chart update index for incremental updates
+    // Chart.js removed - using custom Canvas renderer for performance
     let isSeeking = false; // Track if user is dragging timeline
 
     // Dynamic frame delay: 20 second max playback at 1x, max 500ms per frame, min 50ms
@@ -1798,35 +1874,7 @@ function generateHTML(data, repoUrl) {
 
     // Audio sonification
     const AUDIO_SUPPORTED = !!(window.AudioContext || window.webkitAudioContext);
-    
-    // Frequency mapping: Spread languages across multiple octaves for harmonic clarity
-    // Primary languages (top 3): Wide spacing across 2+ octaves
-    // Secondary languages (4-8): Fill harmonic gaps with pleasant intervals
-    // Tertiary languages (9-16): Complete the harmonic palette
-    //
-    // Design rationale:
-    // - Primary languages are often 70-90% of codebase (e.g., JavaScript in Express)
-    // - Placing them in same octave creates muddy, bass-heavy sound with no timbral change
-    // - Multi-octave spread gives each language its own "voice" in the harmonic spectrum
-    // - Musical intervals (3rds, 5ths, octaves) sound pleasant when overlapping
-    const VOICE_FREQUENCIES = [
-      130.81,  // C3  - 1st: Foundational bass (primary language)
-      329.63,  // E4  - 2nd: Bright, major third harmony (secondary language)
-      392.00,  // G4  - 3rd: High, perfect fifth above E4
-      261.63,  // C4  - 4th: Octave above primary
-      196.00,  // G3  - 5th: Perfect fifth above C3
-      440.00,  // A4  - 6th: Concert pitch, bright
-      293.66,  // D4  - 7th: Middle voice
-      246.94,  // B3  - 8th: Leading tone feel
-      174.61,  // F3  - 9th: Subdominant
-      220.00,  // A3  - 10th: Fills low-mid range
-      349.23,  // F4  - 11th: Upper-mid range
-      493.88,  // B4  - 12th: Highest voice
-      155.56,  // Eb3 - 13th: Minor color
-      311.13,  // Eb4 - 14th: Minor color octave
-      277.18,  // C#4 - 15th: Sharp edge
-      415.30   // G#4 - 16th: Sharp edge high
-    ];
+
     const FILTER_CUTOFF = 2500;        // Hz - saw brightness cap
     const FILTER_Q_BASE = 1;           // Resonance minimum
     const FILTER_Q_MAX = 8;            // Resonance at max intensity
@@ -1839,6 +1887,105 @@ function generateHTML(data, repoUrl) {
     const REVERB_WET = 0.15;           // Reverb wet mix (0-1)
     const FADE_OUT_TIME_MS = 500;      // Time to fade out audio at end
 
+    // === UNIFIED TIMING SYSTEM ===
+    // Everything syncs to beats for musical coherence
+    // Base tempo: 60 BPM = 1 beat per second (scales with playback speed)
+    const BASE_BPM = 60;
+    const BEATS_PER_BAR = 4;                     // 4/4 time signature
+    const BARS_PER_CHORD = 1;                    // Chord changes every bar
+    const BEATS_PER_CHORD = BEATS_PER_BAR * BARS_PER_CHORD;  // 4 beats per chord
+    const CHORD_GLIDE_TIME_MS = 75;              // Quick 75ms glide between chords
+
+    // Drum volumes
+    const KICK_VOLUME = 0.16;                    // Bass drum - needs to be audible
+    const SNARE_VOLUME = 0.10;                   // Snare - gentle texture
+    const HIHAT_VOLUME = 0.06;                   // Hihat - light texture for fast speeds
+
+    // Cymbal crash: triggered on major code changes
+    const CYMBAL_VOLUME = 0.072;                 // Light cymbal - texture only
+    const CYMBAL_THRESHOLD = 0.15;               // 15% change triggers cymbal
+
+    // I-V-vi-IV progression frequencies (C-G-Am-F)
+    // Each chord has 16 frequencies spanning ~3 octaves for rich harmonic texture
+    const CHORD_PROGRESSION = [
+      // I - C Major (C-E-G): warm, stable home chord
+      [
+        130.81,  // C3  - root
+        164.81,  // E3  - major 3rd
+        196.00,  // G3  - perfect 5th
+        261.63,  // C4  - root (octave)
+        329.63,  // E4  - major 3rd
+        392.00,  // G4  - perfect 5th
+        523.25,  // C5  - root (2 octaves)
+        659.25,  // E5  - major 3rd (high)
+        196.00,  // G3  - 5th (doubled)
+        261.63,  // C4  - root (doubled)
+        329.63,  // E4  - 3rd (doubled)
+        392.00,  // G4  - 5th (doubled)
+        440.00,  // A4  - added 6th (color)
+        493.88,  // B4  - major 7th (color)
+        349.23,  // F4  - sus4 color
+        293.66   // D4  - added 9th (color)
+      ],
+      // V - G Major (G-B-D): bright, uplifting dominant
+      [
+        196.00,  // G3  - root
+        246.94,  // B3  - major 3rd
+        293.66,  // D4  - perfect 5th
+        392.00,  // G4  - root (octave)
+        493.88,  // B4  - major 3rd
+        587.33,  // D5  - perfect 5th
+        783.99,  // G5  - root (2 octaves)
+        987.77,  // B5  - major 3rd (high)
+        293.66,  // D4  - 5th (doubled)
+        392.00,  // G4  - root (doubled)
+        493.88,  // B4  - 3rd (doubled)
+        587.33,  // D5  - 5th (doubled)
+        659.25,  // E5  - added 6th (color)
+        739.99,  // F#5 - major 7th (color)
+        523.25,  // C5  - sus4 color
+        440.00   // A4  - added 9th (color)
+      ],
+      // vi - A Minor (A-C-E): melancholic, introspective relative minor
+      [
+        220.00,  // A3  - root
+        261.63,  // C4  - minor 3rd
+        329.63,  // E4  - perfect 5th
+        440.00,  // A4  - root (octave)
+        523.25,  // C5  - minor 3rd
+        659.25,  // E5  - perfect 5th
+        880.00,  // A5  - root (2 octaves)
+        1046.50, // C6  - minor 3rd (high)
+        329.63,  // E4  - 5th (doubled)
+        440.00,  // A4  - root (doubled)
+        523.25,  // C5  - 3rd (doubled)
+        659.25,  // E5  - 5th (doubled)
+        739.99,  // F#5 - added 6th (dorian color)
+        783.99,  // G5  - minor 7th (color)
+        587.33,  // D5  - sus4 color
+        493.88   // B4  - added 9th (color)
+      ],
+      // IV - F Major (F-A-C): warm, subdominant resolution
+      [
+        174.61,  // F3  - root
+        220.00,  // A3  - major 3rd
+        261.63,  // C4  - perfect 5th
+        349.23,  // F4  - root (octave)
+        440.00,  // A4  - major 3rd
+        523.25,  // C5  - perfect 5th
+        698.46,  // F5  - root (2 octaves)
+        880.00,  // A5  - major 3rd (high)
+        261.63,  // C4  - 5th (doubled)
+        349.23,  // F4  - root (doubled)
+        440.00,  // A4  - 3rd (doubled)
+        523.25,  // C5  - 5th (doubled)
+        587.33,  // D5  - added 6th (color)
+        659.25,  // E5  - major 7th (color)
+        466.16,  // Bb4 - sus4 color
+        392.00   // G4  - added 9th (color)
+      ]
+    ];
+
     let audioCtx = null;
     let soundEnabled = false;
     let masterGain = null;
@@ -1849,6 +1996,27 @@ function generateHTML(data, repoUrl) {
     let voices = [];
     let languageVoiceMap = {};  // Map language name to voice index (stable assignment)
     let isFadingOut = false;    // Track if we're fading out audio
+
+    // Unified timing state (all synced to beats)
+    let playbackStartTime = null;   // performance.now() when playback started
+    let totalBeatsElapsed = 0;      // Total beats since playback started
+    let currentBeat = 0;            // Current beat in bar (0-3)
+    let currentChordIndex = 0;      // Which chord in progression
+    let lastScheduledBeat = -1;     // Last beat we scheduled audio for
+    let animationFrameId = null;    // requestAnimationFrame ID for visual updates
+    let audioSchedulerInterval = null; // setInterval ID for audio (runs even when hidden)
+    let lastFrameTime = 0;          // Last frame timestamp for delta calculation
+    let accumulatedTime = 0;        // Accumulated time for frame advancement
+    let lastVisualUpdateTime = 0;   // Track last visual update for throttling
+
+    // Cymbal state
+    let lastCymbalBeat = -1;        // Last beat a cymbal was triggered
+    let lastFrameTotal = 0;         // Track previous frame total for change detection
+
+    // Pre-created noise buffers for drum sounds (avoids GC pressure)
+    let snareNoiseBuffer = null;
+    let hihatNoiseBuffer = null;
+    let cymbalNoiseBuffer = null;
 
     // Data visualization color palette - vivid, distinct colors
     const LANGUAGE_COLORS = {};
@@ -1997,11 +2165,17 @@ function generateHTML(data, repoUrl) {
         const lang = ALL_LANGUAGES[i];
         const tr = document.createElement('tr');
 
-        // Language name cell (static after init)
+        // Language name cell (static after init) with color indicator
         const tdLang = document.createElement('td');
         tdLang.className = 'language-name';
-        tdLang.style.color = LANGUAGE_COLORS[lang];
-        tdLang.textContent = lang;
+        const colorDot = document.createElement('span');
+        colorDot.className = 'language-color';
+        colorDot.style.backgroundColor = LANGUAGE_COLORS[lang];
+        tdLang.appendChild(colorDot);
+        const langText = document.createElement('span');
+        langText.style.color = LANGUAGE_COLORS[lang];
+        langText.textContent = lang;
+        tdLang.appendChild(langText);
         tr.appendChild(tdLang);
 
         // Percentage cell
@@ -2052,166 +2226,228 @@ function generateHTML(data, repoUrl) {
       }
     }
 
+    // High-performance custom Canvas chart (replaces Chart.js for 30fps streaming)
+    let chartCanvas = null;
+    let chartCtx = null;
+    let chartWidth = 0;
+    let chartHeight = 0;
+    const CHART_PADDING = { top: 40, right: 20, bottom: 40, left: 60 };
+    const MAX_RENDER_POINTS = 800; // Max points to render (decimation threshold)
+
     function initChart() {
-      const ctx = document.getElementById('chart-canvas').getContext('2d');
+      chartCanvas = document.getElementById('chart-canvas');
+      chartCtx = chartCanvas.getContext('2d');
 
-      // Chart.js dark theme configuration
-      Chart.defaults.color = '#8b949e';
-      Chart.defaults.borderColor = '#30363d';
+      // Handle high-DPI displays
+      const dpr = window.devicePixelRatio || 1;
+      const rect = chartCanvas.getBoundingClientRect();
+      chartWidth = rect.width;
+      chartHeight = rect.height;
+      chartCanvas.width = chartWidth * dpr;
+      chartCanvas.height = chartHeight * dpr;
+      chartCtx.scale(dpr, dpr);
 
-      // Prepare datasets for each language
-      const datasets = ALL_LANGUAGES.map(lang => ({
-        label: lang,
-        data: [],
-        borderColor: LANGUAGE_COLORS[lang],
-        backgroundColor: LANGUAGE_COLORS[lang] + '15',
-        borderWidth: 2,
-        tension: 0.2,
-        pointRadius: 0,
-        pointHoverRadius: 5,
-        pointHoverBackgroundColor: LANGUAGE_COLORS[lang],
-        pointHoverBorderColor: '#e6edf3',
-        pointHoverBorderWidth: 2,
-        fill: false
-      }));
+      // Handle resize
+      const resizeObserver = new ResizeObserver(entries => {
+        const rect = chartCanvas.getBoundingClientRect();
+        chartWidth = rect.width;
+        chartHeight = rect.height;
+        const dpr = window.devicePixelRatio || 1;
+        chartCanvas.width = chartWidth * dpr;
+        chartCanvas.height = chartHeight * dpr;
+        chartCtx.setTransform(1, 0, 0, 1, 0, 0);
+        chartCtx.scale(dpr, dpr);
+        renderChart();
+      });
+      resizeObserver.observe(chartCanvas);
 
-      chart = new Chart(ctx, {
-        type: 'line',
-        data: {
-          labels: [],
-          datasets: datasets
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          animation: {
-            duration: 0
-          },
-          plugins: {
-            legend: {
-              display: true,
-              position: 'top',
-              labels: {
-                boxWidth: 10,
-                boxHeight: 10,
-                font: { family: "'JetBrains Mono', monospace", size: 10 },
-                padding: 12,
-                usePointStyle: true,
-                pointStyle: 'circle',
-                color: '#8b949e'
-              }
-            },
-            tooltip: {
-              mode: 'index',
-              intersect: false,
-              backgroundColor: '#161b22',
-              borderColor: '#30363d',
-              borderWidth: 1,
-              titleFont: { family: "'JetBrains Mono', monospace", size: 11, weight: '600' },
-              bodyFont: { family: "'JetBrains Mono', monospace", size: 10 },
-              titleColor: '#e6edf3',
-              bodyColor: '#8b949e',
-              padding: 10,
-              cornerRadius: 6,
-              callbacks: {
-                label: function(context) {
-                  return ' ' + context.dataset.label + ': ' + formatNumber(context.parsed.y) + ' lines';
-                }
-              }
-            }
-          },
-          scales: {
-            x: {
-              title: {
-                display: true,
-                text: 'COMMIT',
-                font: { family: "'JetBrains Mono', monospace", size: 9, weight: '600' },
-                color: '#6e7681',
-                padding: { top: 8 }
-              },
-              ticks: {
-                font: { family: "'JetBrains Mono', monospace", size: 9 },
-                color: '#6e7681',
-                maxRotation: 0
-              },
-              grid: {
-                color: '#21262d',
-                lineWidth: 1
-              }
-            },
-            y: {
-              title: {
-                display: true,
-                text: 'LINES OF CODE',
-                font: { family: "'JetBrains Mono', monospace", size: 9, weight: '600' },
-                color: '#6e7681',
-                padding: { bottom: 8 }
-              },
-              ticks: {
-                font: { family: "'JetBrains Mono', monospace", size: 9 },
-                color: '#6e7681',
-                callback: function(value) {
-                  if (value >= 1000000) return (value / 1000000).toFixed(1) + 'M';
-                  if (value >= 1000) return (value / 1000).toFixed(0) + 'k';
-                  return value;
-                }
-              },
-              grid: {
-                color: '#21262d',
-                lineWidth: 1
-              },
-              beginAtZero: true
-            }
-          },
-          interaction: {
-            mode: 'nearest',
-            axis: 'x',
-            intersect: false
+      // Initial render
+      renderChart();
+
+      // Initialize chart legend
+      initChartLegend();
+    }
+
+    function initChartLegend() {
+      const legend = document.getElementById('chart-legend');
+      if (!legend) return;
+
+      legend.innerHTML = '';
+
+      // Show only active languages in legend (sorted by current value)
+      const frame = DATA[DATA.length - 1];
+      const langsWithValues = ALL_LANGUAGES
+        .map(lang => ({
+          lang,
+          value: getMetricValue(frame.languages[lang], 'lines'),
+          color: LANGUAGE_COLORS[lang]
+        }))
+        .filter(l => l.value > 0)
+        .sort((a, b) => b.value - a.value)
+        .slice(0, 8); // Show top 8 in legend
+
+      for (const { lang, color } of langsWithValues) {
+        const item = document.createElement('div');
+        item.className = 'chart-legend-item';
+        item.innerHTML = \`<span class="chart-legend-color" style="background:\${color}"></span>\${lang}\`;
+        legend.appendChild(item);
+      }
+    }
+
+    function formatAxisValue(value) {
+      if (value >= 1000000) return (value / 1000000).toFixed(1) + 'M';
+      if (value >= 1000) return (value / 1000).toFixed(0) + 'k';
+      return value.toString();
+    }
+
+    function renderChart() {
+      if (!chartCtx || currentIndex < 0) return;
+
+      const ctx = chartCtx;
+      const w = chartWidth;
+      const h = chartHeight;
+      const plotLeft = CHART_PADDING.left;
+      const plotTop = CHART_PADDING.top;
+      const plotWidth = w - CHART_PADDING.left - CHART_PADDING.right;
+      const plotHeight = h - CHART_PADDING.top - CHART_PADDING.bottom;
+
+      // Clear canvas
+      ctx.fillStyle = '#0d1117';
+      ctx.fillRect(0, 0, w, h);
+
+      // Find data range and max value across all languages
+      const endIdx = currentIndex;
+      const startIdx = 0;
+      let maxValue = 0;
+
+      for (let i = startIdx; i <= endIdx; i++) {
+        const frame = DATA[i];
+        for (const lang of ALL_LANGUAGES) {
+          const val = getMetricValue(frame.languages[lang], currentMetric);
+          if (val > maxValue) maxValue = val;
+        }
+      }
+
+      // Add 10% headroom
+      maxValue = maxValue * 1.1 || 100;
+
+      // Calculate decimation step
+      const totalPoints = endIdx - startIdx + 1;
+      const step = Math.max(1, Math.ceil(totalPoints / MAX_RENDER_POINTS));
+
+      // Draw grid lines
+      ctx.strokeStyle = '#21262d';
+      ctx.lineWidth = 1;
+
+      // Y-axis grid (5 lines)
+      ctx.font = "9px 'JetBrains Mono', monospace";
+      ctx.fillStyle = '#6e7681';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+
+      for (let i = 0; i <= 5; i++) {
+        const y = plotTop + plotHeight - (i / 5) * plotHeight;
+        const value = (i / 5) * maxValue;
+
+        ctx.beginPath();
+        ctx.moveTo(plotLeft, y);
+        ctx.lineTo(plotLeft + plotWidth, y);
+        ctx.stroke();
+
+        ctx.fillText(formatAxisValue(Math.round(value)), plotLeft - 8, y);
+      }
+
+      // X-axis labels (5-7 labels)
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      const xLabelCount = Math.min(7, totalPoints);
+      const xLabelStep = Math.max(1, Math.floor(totalPoints / xLabelCount));
+
+      for (let i = 0; i <= totalPoints; i += xLabelStep) {
+        if (i > endIdx) break;
+        const x = plotLeft + (i / Math.max(1, endIdx)) * plotWidth;
+        ctx.fillText((i + 1).toString(), x, plotTop + plotHeight + 8);
+      }
+
+      // Axis labels
+      ctx.fillStyle = '#6e7681';
+      ctx.font = "bold 9px 'JetBrains Mono', monospace";
+
+      // X-axis title
+      ctx.textAlign = 'center';
+      ctx.fillText('COMMIT', plotLeft + plotWidth / 2, h - 8);
+
+      // Y-axis title
+      ctx.save();
+      ctx.translate(12, plotTop + plotHeight / 2);
+      ctx.rotate(-Math.PI / 2);
+      const yAxisLabels = { lines: 'LINES OF CODE', files: 'NUMBER OF FILES', bytes: 'SIZE IN BYTES' };
+      ctx.fillText(yAxisLabels[currentMetric] || 'VALUE', 0, 0);
+      ctx.restore();
+
+      // Draw data lines for each language (from bottom to top by current value for better visibility)
+      const langValues = ALL_LANGUAGES.map(lang => ({
+        lang,
+        color: LANGUAGE_COLORS[lang],
+        currentValue: getMetricValue(DATA[endIdx].languages[lang], currentMetric)
+      })).sort((a, b) => a.currentValue - b.currentValue);
+
+      ctx.lineWidth = 1.5;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+
+      for (const { lang, color } of langValues) {
+        ctx.strokeStyle = color;
+        ctx.beginPath();
+
+        let firstPoint = true;
+        for (let i = startIdx; i <= endIdx; i += step) {
+          const frame = DATA[i];
+          const val = getMetricValue(frame.languages[lang], currentMetric);
+          const x = plotLeft + ((i - startIdx) / Math.max(1, endIdx - startIdx)) * plotWidth;
+          const y = plotTop + plotHeight - (val / maxValue) * plotHeight;
+
+          if (firstPoint) {
+            ctx.moveTo(x, y);
+            firstPoint = false;
+          } else {
+            ctx.lineTo(x, y);
           }
         }
-      });
+
+        // Always include the current point
+        if (step > 1) {
+          const val = getMetricValue(DATA[endIdx].languages[lang], currentMetric);
+          const x = plotLeft + plotWidth;
+          const y = plotTop + plotHeight - (val / maxValue) * plotHeight;
+          ctx.lineTo(x, y);
+        }
+
+        ctx.stroke();
+      }
+
+      // Draw border
+      ctx.strokeStyle = '#30363d';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(plotLeft, plotTop, plotWidth, plotHeight);
     }
     
     let lastChartMetric = null;
+    let lastChartUpdateTime = 0;
+    const CHART_UPDATE_INTERVAL_MS = 33; // Target 30fps for chart updates
 
     function updateChart() {
-      if (!chart) return;
+      if (!chartCtx) return;
 
-      // Check if metric changed - need full rebuild
-      if (lastChartMetric !== currentMetric) {
-        lastChartIndex = -1;
-        chart.data.labels = [];
-        chart.data.datasets.forEach(dataset => {
-          dataset.data = [];
-        });
-        lastChartMetric = currentMetric;
+      // Throttle chart renders to maintain 30fps
+      const now = performance.now();
+      if (now - lastChartUpdateTime < CHART_UPDATE_INTERVAL_MS) {
+        return;
       }
+      lastChartUpdateTime = now;
 
-      // Skip if already at current index (no work to do)
-      if (currentIndex === lastChartIndex) return;
-
-      // Reset if going backwards (e.g., user clicked reset or moved timeline back)
-      if (currentIndex < lastChartIndex) {
-        lastChartIndex = -1;
-        chart.data.labels = [];
-        chart.data.datasets.forEach(dataset => {
-          dataset.data = [];
-        });
-      }
-
-      // Optimized O(n) incremental update - only add new data points
-      for (let i = lastChartIndex + 1; i <= currentIndex; i++) {
-        chart.data.labels.push(i + 1);
-
-        chart.data.datasets.forEach((dataset, idx) => {
-          const lang = ALL_LANGUAGES[idx];
-          const stats = DATA[i].languages[lang];
-          dataset.data.push(getMetricValue(stats, currentMetric));
-        });
-      }
-
-      lastChartIndex = currentIndex;
-      chart.update('none'); // No animation for smoother playback
+      // Render the chart
+      renderChart();
     }
 
     // Audio sonification functions
@@ -2242,6 +2478,28 @@ function generateHTML(data, repoUrl) {
       if (audioCtx) return;
 
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+      // Pre-create noise buffers for drum sounds (avoids allocations during playback)
+      const snareBufferSize = Math.floor(audioCtx.sampleRate * 0.1);  // 100ms
+      snareNoiseBuffer = audioCtx.createBuffer(1, snareBufferSize, audioCtx.sampleRate);
+      const snareData = snareNoiseBuffer.getChannelData(0);
+      for (let i = 0; i < snareBufferSize; i++) {
+        snareData[i] = Math.random() * 2 - 1;
+      }
+
+      const hihatBufferSize = Math.floor(audioCtx.sampleRate * 0.05);  // 50ms
+      hihatNoiseBuffer = audioCtx.createBuffer(1, hihatBufferSize, audioCtx.sampleRate);
+      const hihatData = hihatNoiseBuffer.getChannelData(0);
+      for (let i = 0; i < hihatBufferSize; i++) {
+        hihatData[i] = Math.random() * 2 - 1;
+      }
+
+      const cymbalBufferSize = Math.floor(audioCtx.sampleRate * 0.8);  // 800ms
+      cymbalNoiseBuffer = audioCtx.createBuffer(1, cymbalBufferSize, audioCtx.sampleRate);
+      const cymbalData = cymbalNoiseBuffer.getChannelData(0);
+      for (let i = 0; i < cymbalBufferSize; i++) {
+        cymbalData[i] = Math.random() * 2 - 1;
+      }
 
       // Create master gain (final output)
       masterGain = audioCtx.createGain();
@@ -2275,16 +2533,16 @@ function generateHTML(data, repoUrl) {
 
       // Create voice pool (oscillator + individual gain + stereo panner per voice)
       // Each language gets assigned to a voice based on its rank in ALL_LANGUAGES
-      // Primary languages (most common) get widely-spaced frequencies for clarity
+      // Voices start on first chord and progress through I-V-vi-IV every 4 seconds
       for (let i = 0; i < MAX_VOICES; i++) {
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
         const panner = audioCtx.createStereoPanner();
 
         osc.type = 'sine';  // Sine waves for smoother harmonic sound
-        
-        // Use pre-defined frequency for this voice
-        const frequency = VOICE_FREQUENCIES[i] || 440.0;  // Fallback to A4
+
+        // Initialize to first chord in progression (C Major)
+        const frequency = CHORD_PROGRESSION[0][i] || 440.0;  // Fallback to A4
         osc.frequency.value = frequency;
         
         // Base detune: add slight random offset to prevent phase interference
@@ -2322,6 +2580,15 @@ function generateHTML(data, repoUrl) {
 
     function updateAudio() {
       if (!audioCtx || isFadingOut) return;
+
+      // Check for major code changes and trigger cymbal
+      const frame = DATA[currentIndex];
+      if (frame && soundEnabled) {
+        const currentTotal = frame.totalLines || frame.total || 0;
+        if (checkForMajorChange(currentTotal)) {
+          playCymbal();
+        }
+      }
 
       const now = audioCtx.currentTime;
       const rampEnd = now + (RAMP_TIME_MS / 1000);
@@ -2406,13 +2673,13 @@ function generateHTML(data, repoUrl) {
     function fadeOutAudio() {
       if (!audioCtx || !soundEnabled || isFadingOut) return;
       isFadingOut = true;
-      
+
       const now = audioCtx.currentTime;
       const fadeEnd = now + (FADE_OUT_TIME_MS / 1000);
-      
+
       // Fade master gain to zero
       masterGain.gain.linearRampToValueAtTime(0, fadeEnd);
-      
+
       // After fade completes, silence all voices and reset detune
       setTimeout(() => {
         if (!audioCtx) return;
@@ -2425,6 +2692,291 @@ function generateHTML(data, repoUrl) {
 
     function resetAudioState() {
       isFadingOut = false;
+      playbackStartTime = null;
+      totalBeatsElapsed = 0;
+      currentBeat = 0;
+      currentChordIndex = 0;
+      lastScheduledBeat = -1;
+      lastCymbalBeat = -1;
+      lastFrameTotal = 0;
+      accumulatedTime = 0;
+    }
+
+    // Get current BPM adjusted for playback speed
+    function getEffectiveBPM() {
+      return BASE_BPM * speedMultiplier;
+    }
+
+    // Get beat duration in milliseconds at current speed
+    function getBeatDurationMs() {
+      return 60000 / getEffectiveBPM();
+    }
+
+    // Schedule audio events for upcoming beats (lookahead scheduling)
+    function scheduleAudioForBeat(beatNumber, beatTimeInAudioCtx) {
+      if (!audioCtx || !soundEnabled || isFadingOut) return;
+
+      const beatInBar = beatNumber % BEATS_PER_BAR;
+
+      // Drum pattern varies by speed:
+      // - Normal (1x, 2x): kick on 1,3 / snare on 2,4
+      // - Fast (4x+): simplified kick on 1 / hihat on 3
+      if (speedMultiplier >= 4) {
+        // Simplified pattern for fast playback
+        if (beatInBar === 0) {
+          playKick(beatTimeInAudioCtx);
+        } else if (beatInBar === 2) {
+          playHihat(beatTimeInAudioCtx);
+        }
+        // beats 1,3 are silent for cleaner fast playback
+      } else {
+        // Full pattern for normal speeds
+        if (beatInBar === 0 || beatInBar === 2) {
+          playKick(beatTimeInAudioCtx);
+        } else {
+          playSnare(beatTimeInAudioCtx);
+        }
+      }
+
+      // Check for chord change (every BEATS_PER_CHORD beats)
+      if (beatNumber % BEATS_PER_CHORD === 0) {
+        const newChordIndex = Math.floor(beatNumber / BEATS_PER_CHORD) % CHORD_PROGRESSION.length;
+        if (newChordIndex !== currentChordIndex) {
+          currentChordIndex = newChordIndex;
+          applyChordFrequencies(CHORD_GLIDE_TIME_MS / 1000);
+        }
+      }
+    }
+
+    // Main audio scheduling loop - called from animation frame
+    function updateAudioScheduling() {
+      if (!audioCtx || !soundEnabled || isFadingOut || playbackStartTime === null) return;
+
+      const now = performance.now();
+      const elapsedMs = now - playbackStartTime;
+      const beatDurationMs = getBeatDurationMs();
+
+      // Calculate current beat position
+      const currentBeatFloat = elapsedMs / beatDurationMs;
+      const currentBeatInt = Math.floor(currentBeatFloat);
+
+      // Lookahead: schedule beats up to 100ms ahead
+      const lookaheadMs = 100;
+      const lookaheadBeats = Math.ceil((elapsedMs + lookaheadMs) / beatDurationMs);
+
+      // Schedule any beats we haven't scheduled yet
+      for (let beat = lastScheduledBeat + 1; beat <= lookaheadBeats; beat++) {
+        const beatTimeMs = beat * beatDurationMs;
+        const beatTimeFromNow = beatTimeMs - elapsedMs;
+        const beatTimeInAudioCtx = audioCtx.currentTime + (beatTimeFromNow / 1000);
+
+        if (beatTimeInAudioCtx > audioCtx.currentTime) {
+          scheduleAudioForBeat(beat, beatTimeInAudioCtx);
+        }
+      }
+
+      lastScheduledBeat = lookaheadBeats;
+      currentBeat = currentBeatInt % BEATS_PER_BAR;
+      totalBeatsElapsed = currentBeatInt;
+    }
+
+    function applyChordFrequencies(glideTimeSec) {
+      if (!audioCtx || voices.length === 0) return;
+
+      const now = audioCtx.currentTime;
+      const chord = CHORD_PROGRESSION[currentChordIndex];
+
+      for (let i = 0; i < MAX_VOICES && i < voices.length && i < chord.length; i++) {
+        const voice = voices[i];
+        const targetFreq = chord[i];
+
+        if (glideTimeSec > 0) {
+          // Smooth glide to new frequency
+          voice.osc.frequency.linearRampToValueAtTime(targetFreq, now + glideTimeSec);
+        } else {
+          // Immediate set (for initialization)
+          voice.osc.frequency.setValueAtTime(targetFreq, now);
+        }
+      }
+    }
+
+    // Drum synthesis functions - gentle texture beats
+    function playKick(time) {
+      if (!audioCtx || !soundEnabled || isFadingOut) return;
+
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+
+      // Kick: sine wave starting at 150Hz, quickly dropping to 50Hz
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(150, time);
+      osc.frequency.exponentialRampToValueAtTime(50, time + 0.05);
+
+      // Quick attack, medium decay
+      gain.gain.setValueAtTime(0, time);
+      gain.gain.linearRampToValueAtTime(KICK_VOLUME, time + 0.005);
+      gain.gain.exponentialRampToValueAtTime(0.001, time + 0.15);
+
+      osc.connect(gain);
+      gain.connect(masterGain);
+
+      osc.start(time);
+      osc.stop(time + 0.15);
+
+      // Clean up nodes after playback to prevent memory accumulation
+      osc.onended = () => {
+        osc.disconnect();
+        gain.disconnect();
+      };
+    }
+
+    function playSnare(time) {
+      if (!audioCtx || !soundEnabled || isFadingOut || !snareNoiseBuffer) return;
+
+      // Snare body: use pre-created noise buffer
+      const noise = audioCtx.createBufferSource();
+      noise.buffer = snareNoiseBuffer;
+
+      const noiseFilter = audioCtx.createBiquadFilter();
+      noiseFilter.type = 'bandpass';
+      noiseFilter.frequency.value = 3000;
+      noiseFilter.Q.value = 1;
+
+      const noiseGain = audioCtx.createGain();
+      noiseGain.gain.setValueAtTime(0, time);
+      noiseGain.gain.linearRampToValueAtTime(SNARE_VOLUME * 0.6, time + 0.002);
+      noiseGain.gain.exponentialRampToValueAtTime(0.001, time + 0.08);
+
+      noise.connect(noiseFilter);
+      noiseFilter.connect(noiseGain);
+      noiseGain.connect(masterGain);
+
+      noise.start(time);
+      noise.stop(time + 0.1);
+
+      // Clean up noise nodes
+      noise.onended = () => {
+        noise.disconnect();
+        noiseFilter.disconnect();
+        noiseGain.disconnect();
+      };
+
+      // Snare tone: add subtle pitched element
+      const tone = audioCtx.createOscillator();
+      const toneGain = audioCtx.createGain();
+
+      tone.type = 'triangle';
+      tone.frequency.value = 180;
+
+      toneGain.gain.setValueAtTime(0, time);
+      toneGain.gain.linearRampToValueAtTime(SNARE_VOLUME * 0.3, time + 0.002);
+      toneGain.gain.exponentialRampToValueAtTime(0.001, time + 0.05);
+
+      tone.connect(toneGain);
+      toneGain.connect(masterGain);
+
+      tone.start(time);
+      tone.stop(time + 0.05);
+
+      // Clean up tone nodes
+      tone.onended = () => {
+        tone.disconnect();
+        toneGain.disconnect();
+      };
+    }
+
+    function playHihat(time) {
+      if (!audioCtx || !soundEnabled || isFadingOut || !hihatNoiseBuffer) return;
+
+      // Hihat: use pre-created noise buffer
+      const noise = audioCtx.createBufferSource();
+      noise.buffer = hihatNoiseBuffer;
+
+      // High-pass filter for crisp hihat sound
+      const highpass = audioCtx.createBiquadFilter();
+      highpass.type = 'highpass';
+      highpass.frequency.value = 8000;
+      highpass.Q.value = 0.5;
+
+      const hihatGain = audioCtx.createGain();
+      hihatGain.gain.setValueAtTime(0, time);
+      hihatGain.gain.linearRampToValueAtTime(HIHAT_VOLUME, time + 0.001);
+      hihatGain.gain.exponentialRampToValueAtTime(0.001, time + 0.04);
+
+      noise.connect(highpass);
+      highpass.connect(hihatGain);
+      hihatGain.connect(masterGain);
+
+      noise.start(time);
+      noise.stop(time + 0.05);
+
+      // Clean up nodes after playback
+      noise.onended = () => {
+        noise.disconnect();
+        highpass.disconnect();
+        hihatGain.disconnect();
+      };
+    }
+
+    function playCymbal() {
+      if (!audioCtx || !soundEnabled || isFadingOut || !cymbalNoiseBuffer) return;
+
+      // Debounce: max 1 cymbal per beat
+      if (totalBeatsElapsed <= lastCymbalBeat) return;
+      lastCymbalBeat = totalBeatsElapsed;
+
+      const time = audioCtx.currentTime;
+
+      // Cymbal: use pre-created noise buffer
+      const noise = audioCtx.createBufferSource();
+      noise.buffer = cymbalNoiseBuffer;
+
+      // High-pass filter for bright cymbal sound
+      const highpass = audioCtx.createBiquadFilter();
+      highpass.type = 'highpass';
+      highpass.frequency.value = 7000;
+      highpass.Q.value = 0.5;
+
+      // Gentle bandpass for shimmer
+      const bandpass = audioCtx.createBiquadFilter();
+      bandpass.type = 'bandpass';
+      bandpass.frequency.value = 10000;
+      bandpass.Q.value = 0.7;
+
+      const cymbalGain = audioCtx.createGain();
+      // Quick attack, long natural decay
+      cymbalGain.gain.setValueAtTime(0, time);
+      cymbalGain.gain.linearRampToValueAtTime(CYMBAL_VOLUME, time + 0.005);
+      cymbalGain.gain.exponentialRampToValueAtTime(CYMBAL_VOLUME * 0.3, time + 0.1);
+      cymbalGain.gain.exponentialRampToValueAtTime(0.001, time + 0.6);
+
+      noise.connect(highpass);
+      highpass.connect(bandpass);
+      bandpass.connect(cymbalGain);
+      cymbalGain.connect(masterGain);
+
+      noise.start(time);
+      noise.stop(time + 0.8);
+
+      // Clean up nodes after playback
+      noise.onended = () => {
+        noise.disconnect();
+        highpass.disconnect();
+        bandpass.disconnect();
+        cymbalGain.disconnect();
+      };
+    }
+
+    function checkForMajorChange(currentTotal) {
+      if (lastFrameTotal === 0) {
+        lastFrameTotal = currentTotal;
+        return false;
+      }
+
+      const change = Math.abs(currentTotal - lastFrameTotal) / lastFrameTotal;
+      lastFrameTotal = currentTotal;
+
+      return change >= CYMBAL_THRESHOLD;
     }
 
     function resumeAudioContext() {
@@ -2452,15 +3004,31 @@ function generateHTML(data, repoUrl) {
       // Resume audio context if needed (browser autoplay policy)
       if (soundEnabled) {
         resumeAudioContext();
-        
+
         // Fade in from silence to prevent clicks/pops
         if (!wasEnabled && masterGain) {
           const now = audioCtx.currentTime;
           masterGain.gain.setValueAtTime(0, now);
           // Will be ramped up in updateAudio() call below
         }
+
+        // Initialize chord on first sound enable during playback
+        if (isPlaying && playbackStartTime !== null) {
+          applyChordFrequencies(0);
+        }
+
+        // Start audio scheduler if playing
+        if (isPlaying && !audioSchedulerInterval) {
+          audioSchedulerInterval = setInterval(audioSchedulerTick, AUDIO_SCHEDULER_INTERVAL_MS);
+        }
+      } else {
+        // Stop audio scheduler when sound is disabled
+        if (audioSchedulerInterval) {
+          clearInterval(audioSchedulerInterval);
+          audioSchedulerInterval = null;
+        }
       }
-      
+
       // Update audio immediately to reflect new enabled state
       updateAudio();
     }
@@ -2579,6 +3147,58 @@ function generateHTML(data, repoUrl) {
       updateChart();
     }
     
+    // Audio scheduler tick - runs via setInterval to continue when tab is hidden
+    const AUDIO_SCHEDULER_INTERVAL_MS = 25; // Schedule audio every 25ms
+
+    function audioSchedulerTick() {
+      if (!isPlaying || !soundEnabled) return;
+      updateAudioScheduling();
+    }
+
+    // Visual animation loop - uses requestAnimationFrame for smooth rendering
+    function animationLoop(timestamp) {
+      if (!isPlaying) return;
+
+      // Initialize timing on first frame
+      if (lastFrameTime === 0) {
+        lastFrameTime = timestamp;
+      }
+
+      // Calculate delta time and apply speed multiplier
+      const deltaTime = timestamp - lastFrameTime;
+      lastFrameTime = timestamp;
+
+      // Accumulate time for frame advancement
+      accumulatedTime += deltaTime * speedMultiplier;
+
+      // Calculate frame duration at 1x speed
+      const frameDurationMs = Math.max(MIN_FRAME_DELAY, Math.floor(TARGET_DURATION_MS / DATA.length));
+
+      // Advance frames based on accumulated time
+      // Only update index here - display update happens once after the loop
+      const previousIndex = currentIndex;
+      while (accumulatedTime >= frameDurationMs && currentIndex < DATA.length - 1) {
+        accumulatedTime -= frameDurationMs;
+        currentIndex++;
+      }
+
+      // Only update display once per animation frame (not per index increment)
+      if (currentIndex !== previousIndex) {
+        updateDisplay();
+      }
+
+      // Check for end of playback
+      if (currentIndex >= DATA.length - 1) {
+        currentIndex = DATA.length - 1;
+        fadeOutAudio();
+        pause();
+        return;
+      }
+
+      // Continue loop
+      animationFrameId = requestAnimationFrame(animationLoop);
+    }
+
     function play() {
       if (isPlaying) return;
       isPlaying = true;
@@ -2590,26 +3210,55 @@ function generateHTML(data, repoUrl) {
         resumeAudioContext();
       }
 
-      const effectiveDelay = Math.max(MIN_FRAME_DELAY, Math.floor(baseFrameDelay / speedMultiplier));
-      animationInterval = setInterval(() => {
-        currentIndex++;
-        if (currentIndex >= DATA.length) {
-          currentIndex = DATA.length - 1;
-          fadeOutAudio();
-          pause();
-        }
-        updateDisplay();
-      }, effectiveDelay);
+      // Reset timing state for fresh start
+      lastFrameTime = 0;
+      accumulatedTime = 0;
+      playbackStartTime = performance.now();
+      lastScheduledBeat = -1;
+
+      // Set initial chord for audio
+      if (soundEnabled) {
+        applyChordFrequencies(0);
+      }
+
+      // Clear any existing schedulers to prevent dual-scheduling
+      if (audioSchedulerInterval) {
+        clearInterval(audioSchedulerInterval);
+        audioSchedulerInterval = null;
+      }
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+      }
+
+      // Start audio scheduler (setInterval continues when tab is hidden)
+      if (soundEnabled) {
+        audioSchedulerInterval = setInterval(audioSchedulerTick, AUDIO_SCHEDULER_INTERVAL_MS);
+      }
+
+      // Start the visual animation loop
+      animationFrameId = requestAnimationFrame(animationLoop);
     }
 
     function pause() {
       isPlaying = false;
       elements.playPause.textContent = 'Play';
       elements.playPause.classList.add('primary');
-      if (animationInterval) {
-        clearInterval(animationInterval);
-        animationInterval = null;
+
+      // Cancel animation frame
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
       }
+
+      // Cancel audio scheduler interval
+      if (audioSchedulerInterval) {
+        clearInterval(audioSchedulerInterval);
+        audioSchedulerInterval = null;
+      }
+
+      // Reset timing for next play
+      lastFrameTime = 0;
       // Audio continues running, oscillators stay alive
     }
     
@@ -2652,9 +3301,12 @@ function generateHTML(data, repoUrl) {
     
     elements.speed.addEventListener('change', (e) => {
       speedMultiplier = parseFloat(e.target.value);
-      if (isPlaying) {
-        pause();
-        play();
+      // Speed change takes effect immediately via getEffectiveBPM()
+      // Reset beat scheduling to sync with new tempo
+      if (isPlaying && playbackStartTime !== null) {
+        playbackStartTime = performance.now();
+        lastScheduledBeat = -1;
+        totalBeatsElapsed = 0;
       }
     });
 
