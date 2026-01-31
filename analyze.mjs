@@ -2719,14 +2719,14 @@ function generateHTML(data, repoUrl) {
       const beatInBar = beatNumber % BEATS_PER_BAR;
 
       // Drum pattern varies by speed:
-      // - Normal (1x, 2x): kick on 1,3 / snare on 2,4
-      // - Fast (4x+): simplified kick on 1 / hihat on 3
+      // - Normal (1x, 2x): kick on 1,3 / snare on 2,4 (standard rock beat)
+      // - Fast (4x+): kick on 1 / snare on 3 (half-time feel)
       if (speedMultiplier >= 4) {
-        // Simplified pattern for fast playback
+        // Simplified half-time pattern for fast playback
         if (beatInBar === 0) {
           playKick(beatTimeInAudioCtx);
         } else if (beatInBar === 2) {
-          playHihat(beatTimeInAudioCtx);
+          playSnare(beatTimeInAudioCtx);
         }
         // beats 1,3 are silent for cleaner fast playback
       } else {
