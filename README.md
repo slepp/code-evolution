@@ -2,7 +2,13 @@
 
 > 📊 Visualize code evolution over time with interactive animated graphs
 
-Analyzes the evolution of code composition across your git repository's history by running **[scc](https://github.com/boyter/scc)** (default, ~80x faster) or **[cloc](https://github.com/AlDanial/cloc)** on every commit. Generates beautiful, interactive HTML visualizations showing how your codebase has grown and changed.
+Analyzes the evolution of code composition across your git repository's history by running **[scc](https://github.com/boyter/scc)** (default, ~10x faster) or **[cloc](https://github.com/AlDanial/cloc)** on every commit. Generates beautiful, interactive HTML visualizations showing how your codebase has grown and changed.
+
+<div align="center">
+
+**[🌐 Try it online at analyze.devd.ca](https://analyze.devd.ca/)** — Analyze public repositories server-side, no installation required!
+
+</div>
 
 ## ✨ Features
 
@@ -17,7 +23,7 @@ Analyzes the evolution of code composition across your git repository's history 
 - 🔧 **Flexible** - Choose between scc (fast) or cloc (thorough)
 
 ### What's New in v0.10
-- **⚡ scc Support** - Default to scc for ~80x faster analysis
+- **⚡ scc Support** - Default to scc for ~10x faster analysis
 - **🎵 Audio Sonification** - Hear your code evolution (experimental)
 - **📊 Enhanced Metrics** - Complexity and bytes data (with scc)
 - **🔧 Tool Selection** - Choose scc or cloc via `--counter` flag
@@ -29,7 +35,7 @@ Analyzes the evolution of code composition across your git repository's history 
 
 - **Node.js** v16 or higher
 - **scc** (recommended, default) or **cloc**:
-  - **scc** (~80x faster):
+  - **scc** (recommended, ~10x faster):
     - Ubuntu/Debian: `sudo snap install scc` or download from [releases](https://github.com/boyter/scc/releases)
     - macOS: `brew install scc`
     - Windows: `scoop install scc` or download from [releases](https://github.com/boyter/scc/releases)
@@ -158,7 +164,7 @@ Document transitions like "migrated from JavaScript to TypeScript" with visual p
 Choose between scc (fast) or cloc (thorough):
 
 ```bash
-# Use scc (default, ~80x faster)
+# Use scc (default, recommended)
 npx @slepp/code-evolution <repo-url> <output-dir>
 
 # Use cloc (traditional, more language mappings)
@@ -166,7 +172,7 @@ npx @slepp/code-evolution <repo-url> <output-dir> --counter cloc
 ```
 
 **Tool Comparison:**
-- **scc**: Succinct Code Counter (Go), very fast, includes complexity & bytes
+- **scc**: Succinct Code Counter (Go), ~10x faster, includes complexity & bytes
 - **cloc**: Count Lines of Code (Perl), traditional, broader language support
 
 Both provide: files, code lines, blank lines, comment lines
@@ -266,13 +272,23 @@ Apache 2.0 License - see [LICENSE](LICENSE) for details.
 
 ## 📈 Performance Benchmarks
 
+### Using scc (default, recommended)
+
 | Repository Size | First Run | Update (10 commits) | Update (0 commits) |
 |----------------|-----------|--------------------|--------------------|
-| Small (100 commits) | 30s | 3s | 2s |
-| Medium (500 commits) | 2m | 5s | 2s |
-| Large (1000+ commits) | 15m | 10s | 2s |
+| Small (~250 commits) | 2.4s | 0.06s | 0.06s |
+| Medium (~1,500 commits) | 17s | 0.08s | 0.08s |
+| Large (6,000+ commits) | 1m 13s | 0.26s | 0.19s |
 
-*Tested on: Ubuntu 22.04, AMD Ryzen 9, NVMe SSD*
+### Using cloc (traditional)
+
+| Repository Size | First Run | Update (10 commits) | Update (0 commits) |
+|----------------|-----------|--------------------|--------------------|
+| Small (~250 commits) | 22s | ~0.5s | ~0.5s |
+| Medium (~1,500 commits) | 2m 51s | ~1s | ~1s |
+| Large (6,000+ commits) | ~12m | ~2s | ~2s |
+
+*Tested on: Ubuntu 25.04, AMD Ryzen 9 7950X (32 cores), NVMe SSD, scc v3.6.0, cloc v2.04*
 
 ## 💡 Tips
 
