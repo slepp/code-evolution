@@ -11,6 +11,9 @@ test.sh
 # Development scripts
 regen-html.mjs
 
+# Examples (keep package lean; README covers usage)
+examples/
+
 # Documentation (GitHub-specific, not needed in package)
 CONTRIBUTING.md
 SECURITY.md
