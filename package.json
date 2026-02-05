@@ -1,0 +1,55 @@
+{
+  "name": "@slepp/code-evolution",
+  "version": "0.10.0",
+  "description": "Visualize code evolution over time with interactive animated graphs. Analyzes git history using scc or cloc with incremental updates.",
+  "type": "module",
+  "main": "analyze.mjs",
+  "bin": {
+    "code-evolution": "./analyze.mjs"
+  },
+  "scripts": {
+    "analyze": "node analyze.mjs",
+    "test": "./test/run-tests.sh",
+    "test:unit": "node --test test/unit.test.mjs",
+    "test:integration": "node --test test/integration.test.mjs",
+    "test:legacy": "./test.sh"
+  },
+  "keywords": [
+    "scc",
+    "cloc",
+    "git",
+    "code-analysis",
+    "visualization",
+    "metrics",
+    "history",
+    "evolution",
+    "chart",
+    "graph",
+    "incremental",
+    "opentelemetry",
+    "tracing"
+  ],
+  "author": "Stephen Olesen <slepp@slepp.ca>",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/slepp/code-evolution.git"
+  },
+  "bugs": {
+    "url": "https://github.com/slepp/code-evolution/issues"
+  },
+  "homepage": "https://github.com/slepp/code-evolution#readme",
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "dependencies": {},
+  "devDependencies": {},
+  "optionalDependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/sdk-node": "^0.57.0",
+    "@opentelemetry/sdk-trace-node": "^1.30.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.57.0",
+    "@opentelemetry/resources": "^1.30.0",
+    "@opentelemetry/semantic-conventions": "^1.28.0"
+  }
+}

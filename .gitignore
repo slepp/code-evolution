@@ -1,0 +1,49 @@
+# Output directories
+output/
+test-output/
+metrics/
+cloc-history/
+.playwright-cli/
+test/playwright-output/
+tests/playwright-output/
+
+# Internal documentation
+docs/
+CLAUDE.md
+
+# AI Assistant Configuration
+.claude/
+opencode.json
+
+# Node modules (if any future dependencies)
+node_modules/
+
+# npm package artifacts
+*.tgz
+package/
+
+# Temporary files
+*.tmp
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Log files
+*.log
+npm-debug.log*
+
+# Test artifacts
+.tmp/
+temp/
+
+# OS files
+.DS_Store
+.AppleDouble
+.LSOverride
+desktop.ini

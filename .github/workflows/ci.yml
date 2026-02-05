@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+        
+    - name: Install cloc
+      run: sudo apt-get update && sudo apt-get install -y cloc
+      
+    - name: Verify cloc installation
+      run: cloc --version
+      
+    - name: Run tests
+      run: chmod +x test.sh && ./test.sh
+      
+    - name: Test analyze.mjs is executable
+      run: chmod +x analyze.mjs && ./analyze.mjs --help
