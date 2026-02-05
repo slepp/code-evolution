@@ -9,7 +9,7 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { execSync, spawn } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { readFileSync, rmSync, existsSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -28,15 +28,14 @@ function runAnalyzer(args = [], timeout = 60000) {
   const fullArgs = [analyzerPath, ...args];
   
   try {
-    const result = execSync(`node ${fullArgs.join(' ')}`, {
+    execFileSync(process.execPath, fullArgs, {
       cwd: PROJECT_ROOT,
       timeout,
-      stdio: 'pipe',
-      encoding: 'utf8'
+      stdio: 'inherit'
     });
-    return { success: true, output: result };
+    return { success: true, output: '' };
   } catch (error) {
-    return { success: false, error: error.message, output: error.stdout || '' };
+    return { success: false, error: error.message, output: '' };
   }
 }
 
