@@ -1,6 +1,6 @@
 {
   "name": "@slepp/code-evolution",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Visualize code evolution over time with interactive animated graphs. Analyzes git history using scc or cloc with incremental updates.",
   "type": "module",
   "main": "analyze.mjs",
